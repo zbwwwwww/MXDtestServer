@@ -57,11 +57,7 @@ public final class ItemPickupHandler extends AbstractMaplePacketHandler {
         MapleCharacter chr = c.getPlayer();
 
         if (!GM_ONLY_BULK_PICKUP || chr.isGM()) {
-            GmActions.PickupReport rep = GmActions.pickUpWholeMap(chr);
-            chr.dropMessage(6, rep.toMessage());
-            if (rep.picked == 0) {
-                c.announce(MaplePacketCreator.enableActions());
-            }
+            GmActions.pickUpWholeMap(chr);
             return;
         }
 

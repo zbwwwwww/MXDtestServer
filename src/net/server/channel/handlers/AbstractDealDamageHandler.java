@@ -22,7 +22,6 @@
 package net.server.channel.handlers;
 
 import java.awt.Point;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -291,9 +290,7 @@ public abstract class AbstractDealDamageHandler extends AbstractMaplePacketHandl
                     // 钳制到 int 上限：>= 083 任何怪 HP（怪HP为int），多段合计溢出不再变负导致怪物回血
                     // GM 伤害倍率（内存态）：绕过客户端 13.33 亿显示墙，服务端扣血前放大实际伤害
                     long dmgMult = player.getDmgMultiplier();
-                    System.out.println("totDamageAccToOneMonster is :"+new BigDecimal(String.valueOf(totDamageAccToOneMonster)).divide(new BigDecimal("100000000"),2,4) +"亿");
                     int totDamageToOneMonster = (int) Math.min(totDamageAccToOneMonster * dmgMult, (long) Integer.MAX_VALUE);
-                    System.out.println("totDamageToOneMonster is :"+new BigDecimal(String.valueOf(totDamageToOneMonster)).divide(new BigDecimal("100000000"),2,4) +"亿");
                     totDamage += totDamageToOneMonster;
                     monster.aggroMonsterDamage(player, totDamageToOneMonster);
                     if (player.getBuffedValue(MapleBuffStat.PICKPOCKET) != null && (attack.skill == 0 || attack.skill == Rogue.DOUBLE_STAB || attack.skill == Bandit.SAVAGE_BLOW || attack.skill == ChiefBandit.ASSAULTER || attack.skill == ChiefBandit.BAND_OF_THIEVES || attack.skill == Shadower.ASSASSINATE || attack.skill == Shadower.TAUNT || attack.skill == Shadower.BOOMERANG_STEP)) {

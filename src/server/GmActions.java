@@ -24,6 +24,10 @@ import server.life.MapleMonster;
 import server.maps.MapleMap;
 import server.maps.MapleMapItem;
 import server.maps.MapleMapObject;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+import tools.MaplePacketCreator;
 
 /**
  * @author Ronan (原版 pickupItem / resetMobPosition 逻辑)
@@ -33,8 +37,17 @@ public final class GmActions {
     /** 一次按键最多捡多少件，防止地上几百件时把客户端/网络打爆。 */
     public static final int MAX_BULK_PICKUP = 200;
 
+    /** 每批捡几件（控制单次发往客户端的封包量，避免一次性几百包导致卡死/掉线）。 */
+    public static final int BULK_PICKUP_BATCH = 20;
+
+    /** 批间隔（毫秒）：给客户端处理封包、服务端呼吸的间隔。 */
+    public static final int BULK_PICKUP_BATCH_DELAY = 300;
+
     /** 与 MapleCharacter.pickupItem 内的落地保护保持一致（刚掉的物品要等 400ms）。 */
     private static final long DROP_PICKUP_DELAY = 400L;
+
+    /** 进行中的分批捡取任务（按角色 id 记录），用于挡重入 + 换图/下线时取消。 */
+    private static final Map<Integer, ScheduledFuture<?>> bulkPickupFutures = new ConcurrentHashMap<>();
 
     private GmActions() {
     }
@@ -108,35 +121,97 @@ public final class GmActions {
     }
 
     /**
-     * 把当前地图上所有「可捡」的物品捡完，返回逐项统计。
+     * 全屏捡取（分批异步版）。
      *
-     * 复用 MapleCharacter.pickupItem(MapleMapObject)：归属判定（canBePickedBy）、进背包、
-     * 队伍分钱、宠物 / 任务 / 脚本道具链路全部沿用原逻辑，所以不会抢别人的掉落。
+     * 为什么改成批：旧版在一个按键处理里同步循环最多 200 件，每件都给客户端发背包更新包，
+     * 一次性几百个包会把旧客户端打崩；同步循环太久还会让服务端把玩家踢下线。
+     * 现在一次按键发起一个 TimerManager 周期任务：每批只捡 BULK_PICKUP_BATCH 件、
+     * 间隔 BULK_PICKUP_BATCH_DELAY ms，客户端每批只收少量包，服务端也不再长时间阻塞。
+     *
+     * 复用 MapleCharacter.pickupItem：归属 / 进背包 / 队伍分钱 / 宠物 / 任务 / 脚本道具链路全部沿用原逻辑，不抢别人掉落。
+     * 玩家换图或下线时任务自动停止（见 run() 内的地图 id 校验）。
      */
-    public static PickupReport pickUpWholeMap(MapleCharacter chr) {
-        PickupReport rep = new PickupReport();
+    public static void pickUpWholeMap(MapleCharacter chr) {
+        // 已在捡取中 → 挡重入，避免连按 A 起多个任务
+        ScheduledFuture<?> prev = bulkPickupFutures.get(chr.getId());
+        if (prev != null && !prev.isDone()) {
+            chr.dropMessage(5, "[GM] 全屏捡取进行中，请稍候…");
+            return;
+        }
 
+        final int targetMapId = chr.getMapId();
+        final PickupReport rep = new PickupReport();
+
+        chr.dropMessage(5, "[GM] 全屏捡取开始（分批进行，地图物品多也不会卡）…");
+
+        Runnable task = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // 玩家已不在目标地图（换图）或已下线 → 停止，避免在旧图继续捡 / NPE
+                    if (chr.getMapId() != targetMapId || !chr.isLoggedin() || chr.getClient() == null) {
+                        stop(null);
+                        return;
+                    }
+                    int done = pickBatch(chr, rep, BULK_PICKUP_BATCH);
+                    if (done < BULK_PICKUP_BATCH) {
+                        stop(null);                              // 本批没捡满 = 地图上已无可捡的
+                    } else if (rep.picked >= MAX_BULK_PICKUP) {
+                        stop("[GM] 全屏捡取：已达单次上限 " + MAX_BULK_PICKUP + " 件，再按一次继续");
+                    }
+                    // 否则定时器会在 BULK_PICKUP_BATCH_DELAY 后再次调度本任务
+                } catch (Throwable t) {
+                    stop("[GM] 全屏捡取因异常停止");
+                }
+            }
+
+            private void stop(String msg) {
+                ScheduledFuture<?> f = bulkPickupFutures.remove(chr.getId());
+                if (f != null) {
+                    f.cancel(false);
+                }
+                StringBuilder sb = new StringBuilder();
+                if (msg != null) {
+                    sb.append(msg);
+                } else {
+                    sb.append("[GM] 全屏捡取：完成");
+                }
+                sb.append("（已捡 ").append(rep.picked).append(" 件");
+                if (rep.noSpace > 0) sb.append("，背包满 ").append(rep.noSpace);
+                if (rep.justDropped > 0) sb.append("，刚掉落 ").append(rep.justDropped);
+                if (rep.notOwner > 0) sb.append("，归属他人 ").append(rep.notOwner);
+                if (rep.alreadyGone > 0) sb.append("，已捡走 ").append(rep.alreadyGone);
+                if (rep.rejected > 0) sb.append("，被拒 ").append(rep.rejected);
+                sb.append("）");
+                chr.dropMessage(5, sb.toString());
+                // 一件都没捡到时（地图本就没东西 / 全被过滤），发 enableActions 让客户端恢复可操作
+                if (rep.picked == 0 && chr.getClient() != null) {
+                    chr.getClient().announce(MaplePacketCreator.enableActions());
+                }
+            }
+        };
+
+        ScheduledFuture<?> f = TimerManager.getInstance().register(task, BULK_PICKUP_BATCH_DELAY, BULK_PICKUP_BATCH_DELAY);
+        bulkPickupFutures.put(chr.getId(), f);
+    }
+
+    /**
+     * 同步捡一批（最多 limit 件），返回本批成功进背包的件数。
+     * 统计逻辑沿用旧版：归属 / 落地保护 / 背包空间 / 任务限定全部照判，不抢别人、不虚报。
+     */
+    private static int pickBatch(MapleCharacter chr, PickupReport rep, int limit) {
         MapleMap map = chr.getMap();
         List<MapleMapObject> mapItems = map.getItems();     // 内部已做一次拷贝，循环中删对象不会 CME
         if (mapItems.isEmpty()) {
-            return rep;
+            return 0;
         }
 
-        for (MapleMapObject obj : mapItems) {
-            if (obj instanceof MapleMapItem) {
-                rep.total++;
-            }
-        }
-
+        long now = Server.getInstance().getCurrentTime();
         MapleItemInformationProvider ii = MapleItemInformationProvider.getInstance();
 
-        // ★ 关键：dropTime 由 MapleMap 用 Server.getInstance().getCurrentTime() 写入（服务端"集中时间"），
-        //   所以比较也要用同一只时钟。以前这里写的是 System.currentTimeMillis()，
-        //   两只时钟一旦有偏差，刚掉的物品就会被误判成"还在 400ms 保护期"而全部跳过。
-        long now = Server.getInstance().getCurrentTime();
-
+        int done = 0;
         for (MapleMapObject obj : mapItems) {
-            if (rep.picked >= MAX_BULK_PICKUP) {
+            if (done >= limit) {
                 break;
             }
             if (!(obj instanceof MapleMapItem)) {
@@ -144,6 +219,7 @@ public final class GmActions {
             }
 
             MapleMapItem mapitem = (MapleMapItem) obj;
+            rep.total++;
             if (mapitem.isPickedUp()) {
                 rep.alreadyGone++;
                 continue;                                   // 已被捡走
@@ -188,13 +264,14 @@ public final class GmActions {
 
             chr.pickupItem(mapitem);
             if (mapitem.isPickedUp()) {
-                rep.picked++;                               // 只有真被 pickItemDrop 拿走了才算捡到
+                rep.picked++;                               // 只有真被拿走才算捡到
             } else {
-                rep.rejected++;                             // 通知了但被内部逻辑拒绝，不再虚报件数
+                rep.rejected++;                             // 通知了但被内部逻辑拒绝，不虚报件数
             }
+            done++;
         }
 
-        return rep;
+        return done;
     }
 
     /**

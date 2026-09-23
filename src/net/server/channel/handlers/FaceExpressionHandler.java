@@ -68,8 +68,7 @@ public final class FaceExpressionHandler extends AbstractMaplePacketHandler {
         // [GM 快捷键] 借表情键当信号键：只对 GM 生效，非 GM 照原样做表情
         if (chr != null && chr.isGM()) {
             if (emote == EMOTE_BULK_PICKUP) {
-                GmActions.PickupReport rep = GmActions.pickUpWholeMap(chr);
-                chr.dropMessage(6, rep.toMessage());
+                GmActions.pickUpWholeMap(chr);
                 warnIfHidden(chr);
                 return;
             }
