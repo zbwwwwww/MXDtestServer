@@ -1222,6 +1222,13 @@ function summonBoss(idx) {
 
     var map = cm.getMap();
     var pos = cm.getPlayer().getPosition();
+
+    /* 扎昆走分段副本逻辑：先 8 臂 -> 第一形态 -> 第二形态 -> 最终形态 */
+    if (b[0] == 8800000) {
+        summonZakum(pos);
+        return;
+    }
+
     var ok = false;
 
     /* spawnMonsterOnGroundBelow 内部用 calcPointBelow 找下方平台，
@@ -1244,6 +1251,67 @@ function summonBoss(idx) {
     } else {
         cm.dropMessage(5, "[GM] 召唤失败：这里找不到可落脚的平台，站到平地中间再试");
     }
+}
+
+/* ---- 召唤扎昆（分段副本，复刻正常扎昆流程）---- */
+
+function summonZakum(pos) {
+    var map = cm.getMap();
+    var chr = cm.getPlayer();
+
+    /* 1) 刷 8 条手臂：先清手臂，主体 8800000 才能打（Java 端 MapleMap.damageMonster 自动锁定） */
+    for (var i = 8800003; i <= 8800010; i++) {
+        try {
+            map.spawnMonsterOnGroundBelow(i, pos.x + 60, pos.y);
+        } catch (e1) {
+            try {
+                map.spawnMonsterOnGroundBelow(i, pos.x, pos.y);
+            } catch (e2) {}
+        }
+    }
+
+    /* 预先创建二、三形态对象（闭包捕获，在监听回调里 spawn，避免依赖 NPC 会话存活） */
+    var m1 = cm.getMonsterLifeFactory(8800001);
+    var m2 = cm.getMonsterLifeFactory(8800002);
+
+    /* 2) 第一形态 8800000（封印体，8 臂清完 Java 端自动变真） */
+    var m0 = cm.getMonsterLifeFactory(8800000);
+    var spawned = false;
+    try {
+        map.spawnMonsterOnGroundBelow(m0, new Packages.java.awt.Point(pos.x, pos.y));
+        spawned = true;
+    } catch (e) {
+        spawned = false;
+    }
+
+    if (!spawned) {
+        cm.dropMessage(5, "[GM] 扎昆召唤失败：这里找不到可落脚的平台，站到平地中间再试");
+        return;
+    }
+
+    /* 3) 阶段监听：8800000 死 -> 8800001；8800001 死 -> 8800002；8800002 死 -> 通关广播 */
+    m0.addListener(new Packages.server.life.MonsterListener() {
+        monsterKilled: function(aniTime) {
+            chr.getMap().spawnMonsterOnGroundBelow(m1, new Packages.java.awt.Point(pos.x, pos.y));
+            try { chr.dropMessage(5, "[GM] 扎昆第二形态出现！"); } catch (e) {}
+            m1.addListener(new Packages.server.life.MonsterListener() {
+                monsterKilled: function(aniTime) {
+                    chr.getMap().spawnMonsterOnGroundBelow(m2, new Packages.java.awt.Point(pos.x, pos.y));
+                    try { chr.dropMessage(5, "[GM] 扎昆最终形态出现！"); } catch (e) {}
+                    m2.addListener(new Packages.server.life.MonsterListener() {
+                        monsterKilled: function(aniTime) {
+                            chr.getMap().broadcastZakumVictory();
+                        },
+                        monsterDamaged: function(from, trueDmg) {}
+                    });
+                },
+                monsterDamaged: function(from, trueDmg) {}
+            });
+        },
+        monsterDamaged: function(from, trueDmg) {}
+    });
+
+    cm.dropMessage(5, "[GM] 已召唤扎昆（分段副本）：先清 8 条手臂，再依次击败 3 个形态");
 }
 
 /* ---- 召唤怪物-点名（101~131 普通怪）---- */
