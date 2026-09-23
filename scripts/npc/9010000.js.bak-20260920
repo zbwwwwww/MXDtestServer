@@ -1,0 +1,166 @@
+/*
+ * GM 功能菜单
+ *
+ * 入口1（聊天指令）: !run gm_menu
+ * 入口2（点 NPC）  : 射手村「冒险岛管理员」(9010000)
+ *
+ * 本文件编码必须为 UTF-8 —— 脚本引擎用 FileReader 按平台默认编码读取
+ *
+ * 用到的 cm 方法都在服务端源码里核对过存在：
+ *   sendSimple / sendGetText / getText / gainExp / gainMeso / resetStats /
+ *   dropMessage / warp / dispose
+ *   maxJobSkills / changeJobById / giveSkill / warpToMap  ← 本次新增
+ */
+
+var status = 0;
+
+var MENU = "#e[GM 功能菜单]#n\r\n" +
+           "#L0#加经验 100 万\r\n" +
+           "#L1#加经验 1 亿（直接升级）\r\n" +
+           "#L2#加金币 1 亿\r\n" +
+           "#L3#洗属性点（重置属性）\r\n" +
+           "#L4#满技能（本职业全部技能练满）\r\n" +
+           "#L5#修改职业（输入职业ID）\r\n" +
+           "#L6#学习技能（输入技能ID，练到满级）\r\n" +
+           "#L7#传送地图（输入地图ID）\r\n" +
+           "#L8#隐身 / 现身\r\n" +
+           "#L9#去自由市场\r\n" +
+           "#L10#关闭菜单";
+
+function start() {
+    status = 0;
+    action(1, 0, 0);
+}
+
+function toInt(s) {
+    if (s == null) {
+        return -1;
+    }
+    var n = parseInt(String(s).replace(/\s+/g, ""), 10);
+    if (isNaN(n) || n < 0) {
+        return -1;
+    }
+    return n;
+}
+
+function action(mode, type, selection) {
+    if (mode == -1 || mode == 0) {
+        cm.dispose();
+        return;
+    }
+    if (!cm.getPlayer().isGM()) {
+        cm.dispose();
+        return;
+    }
+
+    try {
+        /* ---- 顶层菜单 ---- */
+        if (status == 0) {
+            status = 1;
+            cm.sendSimple(MENU);
+            return;
+        }
+
+        /* ---- 菜单选择 ---- */
+        if (status == 1) {
+            if (selection == 0) {
+                cm.gainExp(1000000);
+                cm.dropMessage(5, "[GM] 经验 +100 万");
+            } else if (selection == 1) {
+                cm.gainExp(100000000);
+                cm.dropMessage(5, "[GM] 经验 +1 亿");
+            } else if (selection == 2) {
+                cm.gainMeso(100000000);
+                cm.dropMessage(5, "[GM] 金币 +1 亿");
+            } else if (selection == 3) {
+                cm.resetStats();
+                cm.dropMessage(5, "[GM] 属性点已重置");
+            } else if (selection == 4) {
+                var n = cm.maxJobSkills();
+                if (n > 0) {
+                    cm.dropMessage(5, "[GM] 已把本职业 " + n + " 个技能练满");
+                } else {
+                    cm.dropMessage(5, "[GM] 当前职业没有可练的技能（初心者无职业技能）");
+                }
+            } else if (selection == 5) {
+                status = 2;
+                cm.sendGetText("#e[修改职业]#n\r\n请输入职业ID：\r\n" +
+                               "战士 100 / 剑客 110 / 勇士 111 / 英雄 112\r\n" +
+                               "法师 200 / 弓手 300 / 飞侠 400 / 海盗 500");
+                return;
+            } else if (selection == 6) {
+                status = 3;
+                cm.sendGetText("#e[学习技能]#n\r\n请输入技能ID（直接练到满级）：\r\n" +
+                               "例：1000002 力量打击");
+                return;
+            } else if (selection == 7) {
+                status = 4;
+                cm.sendGetText("#e[传送地图]#n\r\n请输入地图ID：\r\n" +
+                               "射手村 100000000 / 魔法密林 101000000\r\n" +
+                               "自由市场 910000000 / 天空之城 200000000");
+                return;
+            } else if (selection == 8) {
+                cm.getPlayer().Hide(!cm.getPlayer().isHidden());
+                if (cm.getPlayer().isHidden()) {
+                    cm.dropMessage(5, "[GM] 已隐身");
+                } else {
+                    cm.dropMessage(5, "[GM] 已现身");
+                }
+            } else if (selection == 9) {
+                cm.warp(910000000);
+                cm.dropMessage(5, "[GM] 已传送到自由市场");
+            }
+            cm.dispose();
+            return;
+        }
+
+        /* ---- 输入：职业ID ---- */
+        if (status == 2) {
+            var jobId = toInt(cm.getText());
+            if (jobId < 0) {
+                cm.dropMessage(5, "[GM] 请输入数字职业ID");
+            } else if (cm.changeJobById(jobId)) {
+                cm.dropMessage(5, "[GM] 已转职，职业ID = " + jobId);
+            } else {
+                cm.dropMessage(5, "[GM] 职业ID无效：" + jobId);
+            }
+            cm.dispose();
+            return;
+        }
+
+        /* ---- 输入：技能ID ---- */
+        if (status == 3) {
+            var skillId = toInt(cm.getText());
+            if (skillId < 0) {
+                cm.dropMessage(5, "[GM] 请输入数字技能ID");
+            } else if (cm.giveSkill(skillId, 0)) {
+                cm.dropMessage(5, "[GM] 技能已练满：" + skillId);
+            } else {
+                cm.dropMessage(5, "[GM] 技能ID无效：" + skillId);
+            }
+            cm.dispose();
+            return;
+        }
+
+        /* ---- 输入：地图ID ---- */
+        if (status == 4) {
+            var mapId = toInt(cm.getText());
+            if (mapId < 0) {
+                cm.dropMessage(5, "[GM] 请输入数字地图ID");
+            } else if (cm.warpToMap(mapId)) {
+                cm.dropMessage(5, "[GM] 已传送到地图 " + mapId);
+            } else {
+                cm.dropMessage(5, "[GM] 地图ID不存在：" + mapId);
+            }
+            cm.dispose();
+            return;
+        }
+
+        cm.dispose();
+    } catch (e) {
+        /* 兜底：异常绝不能从这里逃出去。逃出去 dispose() 就不会执行，
+           客户端会挂着一个死掉的 CM，这个 NPC 之后就再也点不动了。 */
+        cm.dropMessage(5, "[GM] 执行出错：" + e);
+        cm.dispose();
+    }
+}
