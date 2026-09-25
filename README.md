@@ -150,19 +150,21 @@ DB_PASS: "<你的数据库密码>"
 
 ---
 
-## 八、近期改动清单（2026-09-19 ~ 09-23）
+## 八、近期改动清单（2026-09-19 ~ 09-25）
 
 ### 1. GM 菜单系统（全新）
 - NPC `9010000` + `scripts/npc/gm_menu.js` 双文件体系，模板 + 生成脚本统一产出，保证 `gm_menu.js`/`9010000.js` 字节一致
-- 主菜单 32 项：全学技能、物品获取/搜索、清背包、加经验金币、召唤 BOSS/点名怪、特效播报、伤害倍率、攻速爆发等
-- 数据驱动：BOSS 清单、点名怪清单、物品预设全部由 Python 脚本扫 wz 自动生成注入
+- 主菜单 32 项：全学技能、物品获取/搜索、清背包、加经验金币、召唤 BOSS/全级别段怪、特效播报、伤害倍率、攻速爆发等
+- 数据驱动：BOSS 清单、怪物清单、物品预设全部由 Python 脚本扫 wz 自动生成注入
 
-### 2. 吸怪模式 toggle（绑 F2 键）
-- `GmActions.java` 新增 F2 键开关；开启后全图活怪拉到角色**右侧 200 身位**（`VACUUM_OFFSET_X=200`）并冻结，新刷怪自动吸，离图自动关
-- 关闭时强制解冻旧怪（`aggroRemoveController` + `aggroUpdateController` 重新交接）
+### 2. 吸怪模式 toggle（绑 F2 键）—— 软围栏
+- `GmActions.java` 新增 F2 键开关；开启后在角色**右侧 200px** 处钉下固定圆心
+- 怪在围栏半径（80px）内自由游走，跑出边界即沿径向拉回围栏线（`MapleMap.startVacuumFence`）
+- 每 100ms 扫描一次，越界即推回；地面护栏防止怪掉出平台
+- 新刷怪自动吸附到圆心附近，离图自动关闭并解冻
 
 ### 3. 全屏捡物（绑 A 键）
-- `GmActions.java` + `ItemPickupHandler.java`：一键拾取全图掉落
+- `GmActions.java` + `ItemPickupHandler.java`：一键拾取全图掉落，异步分批避免卡掉线
 
 ### 4. GM 帽「维泽特帽」(1002140)
 - wz + DB 双改：四维/物攻/魔攻 32767、速度 40、跳跃 35
@@ -185,9 +187,10 @@ DB_PASS: "<你的数据库密码>"
 - GM 菜单一键上 buff（`SkillFactory.getSkill(5121009).getEffect(20).applyTo`），无需学技能不耗蓝，到期一键续
 - 备份：`512.img.xml.bak_20260923`
 
-### 9. 召唤怪物-点名（Lv.101~131）
-- 扫 `Mob.wz` + `String.wz` 自动生成 38 只普通怪清单（剔除 42 只 BOSS，BOSS 走独立召唤）
-- `spawnMonsterOnGroundBelow` 贴地召唤，自由行动不冻结；支持单只/全部召唤
+### 9. 召唤怪物-全级别段
+- 扫 `Mob.wz` + `String.wz` 自动生成 781 只普通怪清单（剔除 BOSS，按名称去重保留正式怪）
+- 13 个级别段，每段首行「本段全部召唤」一键召出该段所有怪
+- `spawnMonsterOnGroundBelow` 贴地召唤，自由行动不冻结
 
 ### 10. HikariCP 连接池修复
 - 连接池改为 `static{}` 初始化 + `initPool()`/`closePool()` 生命周期管理（`Server.java` 接入）
@@ -200,8 +203,9 @@ DB_PASS: "<你的数据库密码>"
 - `handbook/` 12+ 篇开发文档：避坑清单、脚本编码与测试、装备属性存哪怎么改、攻击力上限、怪物密度、时区、DB 表说明等
 - `tools/` 生成与部署管线（已入库，自包含可复现）：
   - `gen_gm_menu.py` — GM 菜单生成器（模板+数据注入 → `gm_menu.js`/`9010000.js` 字节一致）
-  - `gm_menu.template.js` / `gm_extra_boss.js` / `gm_extra_mobs_101_131.js` — 模板与数据文件
-  - `gen_mob_points_101_131.py` — 扫 wz 生成点名怪清单；`patch_5121009.py` — 速效激发 wz 定点改参
+  - `gen_mob_all.py` — 扫 wz 生成全级别段怪物清单（按名去重）
+  - `gen_boss_maps.py` — 扫 wz 生成 BOSS 挑战图清单
+  - `patch_5121009.py` — 速效激发 wz 定点改参
   - `deploy_classes.py` / `patch_jar.py` — Java 改动双部署（classes 目录 + artifact jar）
   - `scan_mob_hp.py` — 全怪物血量扫描；`probe/Probe5121009.java` — wz 真 Java 探针
   - `fixE-bench/skill_names_all.tsv` — 技能中文名表（生成器依赖）
