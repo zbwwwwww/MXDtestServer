@@ -1983,20 +1983,121 @@ public class MapleMap {
         }
     }
     
-    // [吸怪模式] 整图自动吸怪：开关 + 吸引人 + 关闭 + 新怪自动吸
+    // [吸怪模式] 整图自动吸怪：开关 + 吸引人 + 固定圈心 + 围栏 + 关闭 + 新怪自动吸
+    // [吸怪模式] 2026-09-24 改为「围栏放养」：不再冻结怪（冻结会让 MoveLifeHandler 丢弃移动包 → 钉死），
+    //   让怪自身 AI 自然游走，围栏任务只负责把跑出半径的怪拉回来 → 怪围着小范围走动，不跑远也不定死。
+    // [固定圈心] 2026-09-24：圈心不再每 tick 由人物位置实时算，改为「开启那一刻钉下」（见 vacuumCenter），
+    //   之后人物怎么走圈都不动，新刷的怪也落在这个固定点附近 → 适合围绕开通点站桩刷怪。
+    // [软围栏] 2026-09-24：越界后不再「跳回圈心附近随机点」（位移大、方向突变 → 看起来像抽搐），
+    //   改为沿「圈心 → 怪」的射线把怪推回圆周 → 位移 = 越界量（约 1 身位）、方向顺着怪前进方向，
+    //   观感就是贴着看不见的墙滑。083 的怪位由控制器客户端权威计算，服务端无法设物理墙，
+    //   只能做到「越界即被轻推回圆周」，越界量取决于 tick 间隔（见 VACUUM_FENCE_INTERVAL）。
+    // [地面护栏] 2026-09-24 傍晚：径向回推会同时改 x 和 y，而 resetMobPosition 是纯瞬移、不看地形 →
+    //   落点可能悬空，怪就掉下平台；掉落后与圈心的垂直差变大，每 tick 又被按到半空 → 无限下坠。
+    //   现在所有吸怪落点一律先过 safeVacuumLanding：脚下没地面、或地面与怪不在同一层就跳过不动。
     private boolean autoAttract = false;
     private MapleCharacter attractor = null;
+    /** [固定圈心] 开启吸怪那一刻算出的中心点（人物正右 VACUUM_OFFSET_X 处）；关闭时置 null。 */
+    private Point vacuumCenter = null;
+    private ScheduledFuture<?> vacuumFenceTask = null;
+    /** 围栏半径（px）：怪距圈心超过它就被推回圆周，怪也在「±此半径」内自由游走。当前 50 ≈ 圈心左右各 50px。 */
+    private static final int VACUUM_WANDER_RADIUS = 30;
+    /** 围栏检查间隔（ms）：只在越界时才推回。250ms 下怪最多探出约 30px（1.5 身位）就被按回圆周。 */
+    private static final int VACUUM_FENCE_INTERVAL = 250;
+    /**
+     * [地面护栏] 落点地面与「参照高度」允许的最大高低差（px）：超过它说明落点在参照层之外，跳过不动。
+     * 60px ≈ 3 身位：能容忍小台阶与斜坡起伏，又能拦住「从平台边缘掉到下一层」这种几百 px 的落差。
+     * ⚠️ 参照高度由调用方给（见 safeVacuumLanding）：围栏传圈心 y，吸怪传 null（不比较）。
+     */
+    private static final int VACUUM_MAX_DROP = 60;
     public boolean isAutoAttract() { return autoAttract; }
+    /** [固定圈心] 当前钉下的围栏圈心（未开启 / 已关闭时为 null）。 */
+    public Point getVacuumCenter() { return vacuumCenter; }
     public void setAutoAttract(boolean on, MapleCharacter chr) {
         this.autoAttract = on;
         this.attractor = on ? chr : null;
+        // [固定圈心] 开启时在此钉下中心点，之后不再随人物移动；关闭时清空。
+        // [地面护栏] 圈心本身也过一遍校验：优先「人物正右 VACUUM_OFFSET_X」的地面，那里悬空就退到人物脚下的地面。
+        this.vacuumCenter = on ? vacuumCenterFor(chr.getPosition()) : null;
+        if (on) {
+            startVacuumFence();
+        } else {
+            stopVacuumFence();
+        }
     }
-    /** 关闭整图自动吸怪并解冻所有怪（吸引人离图/断开时调用）。 */
+    /** 启动围栏任务：周期检查，把越界的怪沿径向推回圆周（不冻结，怪自走）。 */
+    private void startVacuumFence() {
+        stopVacuumFence();
+        vacuumFenceTask = TimerManager.getInstance().register(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (!autoAttract || attractor == null) {
+                        stopVacuumFence();
+                        return;
+                    }
+                    if (attractor.getMap() != MapleMap.this || !attractor.isLoggedin() || attractor.getClient() == null) {
+                        stopAutoAttract();
+                        return;
+                    }
+                    Point center = vacuumCenter;   // [固定圈心] 读开启时钉下的点，不随人物移动
+                    if (center == null) {
+                        stopVacuumFence();
+                        return;
+                    }
+                    double radiusSq = (double) VACUUM_WANDER_RADIUS * VACUUM_WANDER_RADIUS;
+                    for (MapleMonster m : getAllMonsters()) {
+                        if (!m.isAlive()) {
+                            continue;
+                        }
+                        Point mp = m.getPosition();
+                        double distSq = mp.distanceSq(center);
+                        if (distSq <= radiusSq) {
+                            continue;   // 圈内：一个字节都不发，完全交给怪自身 AI
+                        }
+                        // [软围栏] 沿「圈心 → 怪」的射线，把怪按回圆周：位移 = 越界量（约 1 身位），
+                        // 方向顺着怪原来的前进方向 → 观感是「滑到墙边被轻轻挡住」，而不是被拽回圈心的抽搐。
+                        double dist = Math.sqrt(distSq);
+                        if (dist < 1.0d) {
+                            continue;
+                        }
+                        int nx = center.x + (int) Math.round((mp.x - center.x) * VACUUM_WANDER_RADIUS / dist);
+                        int ny = center.y + (int) Math.round((mp.y - center.y) * VACUUM_WANDER_RADIUS / dist);
+                        // [地面护栏] 圆周上的这个点可能是半空（平台边缘外、悬在深坑上方）：先看脚底有没有
+                        // 同层地面，站不住就不动它 —— 硬按过去会掉下平台，且掉落后会每 tick 被按到半空 → 无限下坠。
+                        // ⚠️ 层级比较的参照必须传「圈心的 y」而不是怪当前的 y：怪已经在圈外了，
+                        //    它可能正站在别的层（或已掉下去），拿它自己比会被判成「异层」→ 永久跳过、再也回不来。
+                        Point land = safeVacuumLanding(center.y, new Point(nx, ny));
+                        if (land == null) {
+                            // 圆周那一点正好悬在深坑上：退一步直接按回圈心（圈心本身一定是站得住的地面）。
+                            land = safeVacuumLanding(null, center);
+                        }
+                        if (land == null) {
+                            continue;
+                        }
+                        m.resetMobPosition(land);
+                    }
+                } catch (Throwable e) {
+                }
+            }
+        }, VACUUM_FENCE_INTERVAL, VACUUM_FENCE_INTERVAL);
+    }
+    /** 停掉围栏任务（幂等）。 */
+    private void stopVacuumFence() {
+        if (vacuumFenceTask != null) {
+            vacuumFenceTask.cancel(false);
+            vacuumFenceTask = null;
+        }
+    }
+    /** 关闭整图自动吸怪（含清空固定圈心）并唤醒被冻结的怪（吸引人离图/断开时调用）。 */
     public void stopAutoAttract() {
+        stopVacuumFence();
+        vacuumCenter = null;    // [固定圈心] 清空，下次开启重新钉
         if (!autoAttract) return;
         for (MapleMonster m : getAllMonsters()) {
-            if (m.isAlive()) {
+            if (m.isAlive() && m.isFrozen()) {
                 m.setFrozen(false);
+                // 兼容历史版本：只唤醒被「冻结式吸怪」钉住的怪（围栏放养不冻结，正常游走的怪不受影响）。
                 // 强制重新交接 controller：旧怪被钉住期间客户端已停止给它发 MOVE_LIFE，
                 // 仅 aggroUpdateController() 会因「已有 controller」直接 return 而不唤醒，
                 // 必须 remove + add 让客户端重新认领这只怪、恢复游走 AI。
@@ -2007,16 +2108,70 @@ public class MapleMap {
         autoAttract = false;
         attractor = null;
     }
-    /** 吸怪落点相对人物的水平右偏移：10 个身位（约 10*20px），让怪停在人物右侧、不重叠被碰到。 */
+    /** 吸怪圈心相对「开启时人物站位」的水平右偏移：10 个身位（约 10*20px）；开启那刻钉下后不再变。 */
     private static final int VACUUM_OFFSET_X = 200;
-    /** 把吸怪落点算到人物正右方 VACUUM_OFFSET_X 像素处（y 不变）。 */
+    /** 把「开启时人物位置」换算成圈心：正右方 VACUUM_OFFSET_X 像素处（y 不变）。 */
     public static Point vacuumTargetPoint(Point origin) {
         return new Point(origin.x + VACUUM_OFFSET_X, origin.y);
     }
+    /**
+     * [地面护栏] 判断 target 能不能站得住，返回「吸附到地面后」的安全落点。
+     *
+     * 两步判定：① 找 target 脚下的地面（calcPointBelow）；② 该地面与「参照高度」的差不得超过 VACUUM_MAX_DROP。
+     * 任一不满足（脚下是悬崖/深渊，或地面在参照层之外）都返回 null —— 调用方必须跳过这只怪，绝不能硬按过去：
+     * 硬按的后果是怪掉下平台，掉落后与圈心垂直差变大，下一 tick 又被按到半空的圆周点 → 无限下坠。
+     *
+     * 注意「参照高度」该传谁（2026-09-24 傍晚修的 bug）：
+     *   · 围栏回推 —— 必须传 **圈心的 y**，不能传怪当前的 y。被推出围栏的怪本来就在圈外，
+     *     它的位置可能已经掉到别的层/高处，拿它自己当参照 → 回推永远被判成「异层」而跳过 → 怪再也回不来。
+     *   · 新刷怪吸怪 —— 传 null（不做层级比较）。吸怪的目的就是把怪搬到圈心那层，
+     *     若按「怪当前所在层」比，怪刷在高层平台时会被永久拦下 → 新怪永远吸不过来。
+     *
+     * @param refY   参照高度（px）；传 null 表示不做层级比较（用于「把怪从任意位置拉回圈心」这类必须拉的场合）
+     * @param target 期望落点
+     * @return 吸附地面后的落点（y 再减 1，与 spawnMonsterOnGroundBelow 的惯例一致）；不可站则返回 null
+     */
+    public Point safeVacuumLanding(Integer refY, Point target) {
+        Point land = calcPointBelow(new Point(target.x, target.y - 1));
+        if (land == null) {
+            return null;                                        // 脚下没有地面：悬崖外 / 深渊
+        }
+        if (refY != null && Math.abs(land.y - refY.intValue()) > VACUUM_MAX_DROP) {
+            return null;                                        // 地面在别的层：别把怪按过去
+        }
+        return new Point(land.x, land.y - 1);
+    }
+    /**
+     * [地面护栏] 算「开启吸怪」要钉下的圈心，保证它一定站得住。
+     * 优先取「人物正右 VACUUM_OFFSET_X」处的地面；若那里悬空或与人物不在同一层（右侧是悬崖/平台外），
+     * 退化为人物脚下的地面点 —— 否则圈心悬空会让所有落点都被护栏拦下，吸怪整个失效。
+     */
+    private Point vacuumCenterFor(Point origin) {
+        Point land = safeVacuumLanding(origin.y, vacuumTargetPoint(origin));
+        if (land != null) {
+            return land;
+        }
+        Point self = calcPointBelow(new Point(origin.x, origin.y - 1));   // 退一步：钉在人物脚下的地面
+        return self != null ? new Point(self.x, self.y - 1) : new Point(origin.x, origin.y - 1);
+    }
     private void attractIfEnabled(MapleMonster m) {
-        if (autoAttract && attractor != null && attractor.getMap() == this) {
-            m.setFrozen(true);
-            m.resetMobPosition(vacuumTargetPoint(attractor.getPosition()));
+        if (autoAttract && attractor != null && vacuumCenter != null && attractor.getMap() == this) {
+            // [2026-09-24] 围栏放养 + 固定圈心：不再 setFrozen(true)（会让怪被 MoveLifeHandler 丢弃移动包 → 钉死），
+            // 把新刷的怪撒到「开启时钉下的圈心」附近（圈内随机，避免一坨怪叠在同一点），
+            // 之后交给怪自身 AI 游走 + 围栏任务兜底。
+            // [地面护栏] 落点先吸附到「圈心脚下那块地面」；不做层级比较（refY 传 null）——
+            // 吸怪本来就要把怪从任意位置搬到圈心这层，若按「怪当前所在层」比，
+            // 怪刷在高层平台时会被永久判成「异层」而跳过 → 打死怪后补刷的怪永远吸不过来。
+            // 只有「脚下真的没有地面」（悬在深坑上）才放弃，退回圈心；圈心也站不住就留在刷怪点不动。
+            Point land = safeVacuumLanding(null, new Point(
+                    vacuumCenter.x + Randomizer.nextInt(VACUUM_WANDER_RADIUS * 2 + 1) - VACUUM_WANDER_RADIUS,
+                    vacuumCenter.y));
+            if (land == null) {
+                land = safeVacuumLanding(null, vacuumCenter);
+            }
+            if (land != null) {
+                m.resetMobPosition(land);
+            }
         }
     }
 

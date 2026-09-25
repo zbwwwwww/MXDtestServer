@@ -335,6 +335,12 @@ public class MobSkill {
                 int i = 0;
                 for (MapleCharacter character : getPlayersInRange(monster)) {
                     if (!character.hasActiveBuff(2321005)) {  // holy shield
+                        // [2026-09-24] 已中同种状态 → 跳过。applyStatus 内部本来就会拒绝重复上病，
+                        // 但拒绝发生在【包已经发出去之后】；这里把判定提前到发包前，直接把
+                        // showMonsterSkill / applyStatus 这串冗余封包省掉（多只手臂叠同种 debuff 时最明显）。
+                        if (character.hasDisease(disease)) {
+                            continue;
+                        }
                         if (disease.equals(MapleDisease.SEDUCE)) {
                             if (i < 10) {
                                 character.giveDebuff(MapleDisease.SEDUCE, this);
@@ -346,7 +352,10 @@ public class MobSkill {
                     }
                 }
             } else {
-                player.giveDebuff(disease, this);
+                // [2026-09-24] 同上：已中同种状态就不再重复发包
+                if (!player.hasDisease(disease)) {
+                    player.giveDebuff(disease, this);
+                }
             }
         }
     }

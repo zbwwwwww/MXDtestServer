@@ -311,9 +311,15 @@ public final class GmActions {
 
     /**
      * 吸怪模式开关（替代原来的一次性 vacuumMonsters）。
-     * 开 → 把全图活怪拉到脚下并冻结（钉死）；关 → 解除冻结。
-     * 开启期间地图新刷的怪（含击杀后的补刷）由 MapleMap.spawnMonster 经 attractIfEnabled 自动吸住，
+     * 开 → 钉下「固定圈心」并把全图活怪搬过去，再交给「围栏放养」维持（不冻结，怪自身 AI 自然游走、跑远才被拉回）；
+     * 关 → 关闭围栏、清空圈心，怪恢复完全自由走动。
+     * 开启期间地图新刷的怪（含击杀后的补刷）由 MapleMap.spawnMonster 经 attractIfEnabled 自动落到固定圈心附近，
      * 所以开启后无需再按吸怪键。吸引人离图/断开时由 MapleMap.stopAutoAttract 自动关。
+     *
+     * [2026-09-24] 去掉 setFrozen(true)：冻结会让 MoveLifeHandler 丢弃该怪的移动包（连响应都不回），
+     * 客户端因此不推进位置 → 怪被钉死不动。改成围栏放养后，怪自身 AI 继续游走，只在跑出半径时才被拉回。
+     * [2026-09-24] 圈心改为固定：先 setAutoAttract(true) 钉下中心，再用同一个点搬怪，
+     * 保证「怪落点」与「围栏圈心」逐像素一致；之后人物移动不会带着圈跑。
      */
     public static boolean toggleVacuum(MapleCharacter chr) {
         MapleMap map = chr.getMap();
@@ -321,14 +327,27 @@ public final class GmActions {
             map.stopAutoAttract();
             return false;
         }
-        Point pos = MapleMap.vacuumTargetPoint(chr.getPosition());
+        // [固定圈心] 先钉圈心（在 setAutoAttract 内按 chr 当前站位算出并记住），
+        // 再取回同一个点把全图活怪搬过去，避免「搬怪的点」和「围栏的点」算出两个值。
+        map.setAutoAttract(true, chr);
+        Point pos = map.getVacuumCenter();
+        if (pos == null) {          // 理论不可达，兜底防 NPE
+            map.stopAutoAttract();
+            return false;
+        }
+        // [地面护栏] 圈心站不住（悬空）就一只都不搬 —— 否则会把全图怪一起丢到半空。
+        // 校验时 from 传 null = 不比较层级，这样已经掉到下面那层的怪也能被这次搬运拉回圈心所在层。
+        Point land = map.safeVacuumLanding(null, pos);
+        if (land == null) {
+            map.stopAutoAttract();
+            chr.dropMessage(6, "[GM] 吸怪开启失败：圈心位置站不住（人物右侧与脚下都找不到可站立的地面）");
+            return false;
+        }
         for (MapleMonster m : map.getAllMonsters()) {
             if (m.isAlive()) {
-                m.setFrozen(true);
-                m.resetMobPosition(pos);
+                m.resetMobPosition(land);
             }
         }
-        map.setAutoAttract(true, chr);
         return true;
     }
 

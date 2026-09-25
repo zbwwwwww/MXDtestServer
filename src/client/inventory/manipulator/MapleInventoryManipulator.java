@@ -432,7 +432,53 @@ public class MapleInventoryManipulator {
             }
         }
     }
-    
+
+    /**
+     * [2026-09-24] 批量清空某个栏位（GM「一键清除背包」用）。
+     *
+     * 旧做法是对每件装备各调一次 removeFromSlot → 每件都 announce 一个 modifyInventory 包，
+     * 清 120 件就是 120 个包在同一同步循环里砸向客户端 → 客户端冻结 → 卡掉线。
+     * 这里改成：快照清单 → 内存里一次性删完 → 只发 1 个 modifyInventory（mods 列表，type=3 移除）。
+     *
+     * ⛔ EQUIPPED（身上穿着的装备栏）直接 return，绝不脱装 —— 服务端的 EQUIP 栏与 EQUIPPED 栏
+     *    是两套独立数组，本方法只用于清背包栏。
+     */
+    public static void removeAllItems(MapleClient c, MapleInventoryType type, boolean fromDrop) {
+        if (type == MapleInventoryType.EQUIPPED) {
+            return;
+        }
+        MapleCharacter chr = c.getPlayer();
+        MapleInventory inv = chr.getInventory(type);
+        if (inv == null) {
+            return;
+        }
+
+        List<ModifyInventory> mods = new ArrayList<>();
+        inv.lockInventory();
+        try {
+            List<Item> items = new ArrayList<>(inv.list());
+            for (Item item : items) {
+                short slot = item.getPosition();
+                int petid = item.getPetId();
+                if (petid > -1) {
+                    int petIdx = chr.getPetIndex(petid);
+                    if (petIdx > -1) {
+                        MaplePet pet = chr.getPet(petIdx);
+                        chr.unequipPet(pet, true);
+                    }
+                }
+                inv.removeItem(slot, item.getQuantity(), false);
+                mods.add(new ModifyInventory(3, item));
+            }
+        } finally {
+            inv.unlockInventory();
+        }
+
+        if (!mods.isEmpty()) {
+            c.announce(MaplePacketCreator.modifyInventory(fromDrop, mods));
+        }
+    }
+
     private static void announceModifyInventory(MapleClient c, Item item, boolean fromDrop, boolean allowZero) {
         if (item.getQuantity() == 0 && !allowZero) {
             c.announce(MaplePacketCreator.modifyInventory(fromDrop, Collections.singletonList(new ModifyInventory(3, item))));

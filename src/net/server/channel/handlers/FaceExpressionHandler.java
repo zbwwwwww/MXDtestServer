@@ -75,8 +75,8 @@ public final class FaceExpressionHandler extends AbstractMaplePacketHandler {
             if (emote == EMOTE_VACUUM) {
                 boolean on = GmActions.toggleVacuum(chr);
                 chr.dropMessage(6, on
-                        ? "[GM] 吸怪模式：开（自动吸住全图怪，击杀后新怪自动补吸；离图自动关）"
-                        : "[GM] 吸怪模式：关（已解除定怪）");
+                        ? "[GM] 吸怪模式：开（圈心固定在开启点，怪围着小范围游走；击杀后新怪自动补吸；离图自动关）"
+                        : "[GM] 吸怪模式：关（圈心已清，怪恢复自由走动）");
                 warnIfHidden(chr);
                 return;
             }

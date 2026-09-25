@@ -261,7 +261,7 @@ server:
     USE_MULTIPLE_SAME_EQUIP_DROP: true  #Enables multiple drops by mobs of the same equipment, number of possible drops based on the quantities provided at the drop data.
     USE_BANISHABLE_TOWN_SCROLL: false    #Enables town scrolls to act as if it's a "player banish", rendering the antibanish scroll effect available.
     USE_ENABLE_FULL_RESPAWN: true        #At respawn task, always respawn missing mobs when they're available. Spawn count doesn't depend on how many players are currently there. [2026-09-21 改 true：每次补怪都把刷怪点填满 => 怪物密度由 ~75% 提到 100%]
-    MOB_SPAWN_MULTIPLIER: 3              # [2026-09-22 新增] 刷怪点密度倍率：每张图的每个 wz 刷怪点额外复制 (N-1) 份，怪上限 xN。1=原版，2=翻倍，3=三倍。只对普通怪生效，已自动排除 BOSS / 一次性剧情怪(mobTime=-1) / 团队副本怪(team>=0)；复制体沿 X 轴左右错开并重新贴地。
+    MOB_SPAWN_MULTIPLIER: 2              # [2026-09-22 新增] 刷怪点密度倍率：每张图的每个 wz 刷怪点额外复制 (N-1) 份，怪上限 xN。1=原版，2=翻倍，3=三倍。只对普通怪生效，已自动排除 BOSS / 一次性剧情怪(mobTime=-1) / 团队副本怪(team>=0)；复制体沿 X 轴左右错开并重新贴地。[2026-09-23 由 3 降回 2：3 倍时客户端被封包淹没，怪多/攻击时卡掉线；2 倍仍比原版密且实测稳定]
     USE_ENABLE_CHAT_LOG: false          #Write in-game chat to log
     USE_REBIRTH_SYSTEM: false           #Flag to enable/disable rebirth system
     USE_MAP_OWNERSHIP_SYSTEM: false      #Flag to enable/disable map ownership system

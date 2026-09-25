@@ -44,7 +44,7 @@
  *     服务端确实学会了，但客户端 UI 不列出来）—— 菜单里会明确标出来
  *
  * 设计要点（2026-09-22 第 8 轮：新增 10 项 + 一键清背包）：
- *   - 新入口一律【追加到主菜单末尾】，#L 编号顺延，「关闭菜单」保持在最后（现为 #L31#）
+ *   - 新入口一律【追加到主菜单末尾】，#L 编号顺延，「关闭菜单」保持在最后（现为 #L32#）
  *   - 主菜单已经 31 项，客户端对话框放不下会自带滚动条；需要多步的仍然单独开一屏
  *   - 一键清背包【按栏位分类】，清理前必须二次确认；只清背包栏，绝不动身上装备
  *     （EQUIP 与 EQUIPPED 在服务端是两个独立数组，清 EQUIP 不会脱装备）
@@ -73,14 +73,19 @@
  *   45 输入：物品名/ID 搜索    46 搜索结果列表
  *   47 召唤怪物-点名列表（101~131，点一行=召唤 / 全部召唤）
  *   48 伤害倍率菜单（×1/×10/×100/×1000，服务端放大实际扣血）
+ *   49 召唤怪物-全级别段（选等级段）
+ *   50 召唤怪物-某一段内的怪物列表（点一行=召唤一只 / 本段全部召唤 / 换段）
  */
 
 var status = 0;
 var family = null;
-var curList = null;      /* 当前正在展示的地图列表（HUNT_MAPS / BOSS_MAPS / TOWN_MAPS） */
+var curList = null;      /* 当前正在展示的地图列表（HUNT_MAPS / BOSS_MAPS / TOWN_MAPS_ALL） */
 var curGroup = 0;        /* 当前正在展示的技能组 / 物品组下标（SKILL_GROUPS / ITEM_GROUPS） */
 var curOrder = null;     /* 技能组的显示顺序（本职业链排前面），选择时按下标取 */
 var curTier = 0;         /* 当前展示的 BOSS 档位下标（BOSS_TIERS） */
+var curMobTier = 0;      /* 当前展示的「召唤怪物-全级别段」档位下标（MOB_TIERS_ALL） */
+var curMobPage = 0;      /* 该档位段内列表翻到的页（0 起）；MOB_TIERS_ALL 最大的段有 161 只，不分页得滚半天 */
+var MOB_PAGE = 40;       /* 段内列表每页最多显示几只；末三行固定占用 #L 的 MOB_PAGE / +1 / +2 */
 var pendingBagType = 0;  /* 待确认清理的背包栏位（0 = 全部，不含装饰栏） */
 var curHits = null;      /* 「按名字搜物品」的结果：[[id, 名字], ...] */
 var curHitsKw = "";      /* 上一次搜索用的关键字（回显用） */
@@ -136,18 +141,25 @@ var MAX_ITEM_GROUPS = 20;
  *      ⇒ 所以"150 级以上的练级图"在这个版本里不存在，猎场清单已经铺开到 Lv.100~131 全档。
  * 格式：[地图ID, 显示名, 最高怪等级]（等级 0 = 不显示等级，用于城镇）
  * 地图名已全部过滤为 GB2312 可编码（wz 里大量地图名是韩文，直接进脚本会乱码）
+ * 注：这里存放的是合并后的「Lv.100 以上练级场」（原高等级猎场 + Lv.100+ 图，见下）
  */
-var HUNT_MAPS = [
-/*@HUNT_MAPS@*/
-];
+/* 第 12 轮：BOSS 挑战图改为 wz 全量扫描，行结构变成 [地图ID, 地图名, BOSS数, BOSS名单]
+ * 判据（都在 tools/gen_boss_maps.py 里，别凭感觉改）：
+ *   1. Map.wz 的 life 节点里刷的怪，在 Mob.wz 里 info/boss != 0（wz 官方的 BOSS 标记）
+ *   2. 地图要有 portal（有落脚点，不然传送过去是一片虚空）
+ *   3. 地图名能编进 GB2312（封包是 GB2312，韩文地图名进去就乱码）
+ * 行尾的 BOSS 名单是给菜单直接看的 —— 传送过去有没有 BOSS，点开就知道。
+ */
+var BOSS_MAPS = /*@BOSS_MAPS_ALL@*/;
 
-var BOSS_MAPS = [
-/*@BOSS_MAPS@*/
-];
+/* 地图列表每页显示几条（BOSS 挑战图有 800+ 张，一次全铺开客户端要卡） */
+var MAP_PAGE = 40;
 
-var TOWN_MAPS = [
-/*@TOWN_MAPS@*/
-];
+/* 当前页码（换档位时归零） */
+var MAP_PAGE_NO = 0;
+
+/* 当前列表的标题，翻页时重新渲染要用 */
+var curTitle = "";
 
 /* ================= 技能 / 物品数据 =================
  * 技能组：[职业编号, 组名, [[技能ID, 中文名], ...]]
@@ -186,6 +198,34 @@ var BOSS_TIERS = /*@BOSS_TIERS@*/;
  *           默认只放普通怪（38 只）；要连 BOSS 一起点名，改 gen 脚本 INCLUDE_BOSS 重生成。
  * 召唤用 map.spawnMonsterOnGroundBelow：自动贴地、自由行动（不冻结）。 */
 var MOB_POINTS_101_131 = /*@MOB_POINTS@*/;
+
+/* ================= 第 9 轮新增数据（全级别段召唤 / 传送地图扩充） =================
+ * 注意：下面三个占位符本身就是完整的数组字面量（含最外层 []），别再套一层。
+ */
+
+/* 城镇全表（含常用 + wz 全量精选）：[地图ID, 显示名, 等级]
+ * 第 11 轮起：原来手写的 14 个「常用城镇」已并入这里，与 gen_maps_extra.py 从 wz 出的
+ *            90 张精选取并集去重，菜单里只剩这一份城镇列表。
+ * 数据来源：Map.wz/Map/* 逐张读 town=1 且本图不带怪（maxlv==0）→ 真城镇 508 张，
+ *           再按 streetName 分组、滤掉店铺/活动/重复图，每区留 2 张，得 90 张。
+ * 等级列全填 0 = 显示时不带「Lv.」前缀。地图名已过滤为 GB2312 / 纯汉字可编码。 */
+var TOWN_MAPS_ALL = /*@TOWN_MAPS_ALL@*/;
+
+/* Lv.100 以上练级场：[地图ID, 显示名, 最高怪等级]
+ * 第 10 轮起：原「高等级猎场」(handbook 精选 30 张) 与 gen_maps_extra.py 出的 Lv.100+ 图
+ *            (46 张) 已合并进 HUNT_MAPS，按怪等级从高到低排，菜单里一条看全。
+ *            ⇒ 本文件不再有单独的 HUNT_MAPS_HIGH，传送菜单里也不再有「高等级猎场」这一档。
+ * 数据来源：Map.wz/Map/* 顶层 life 节点里的怪物等级 >= 100 的图，覆盖 Lv.100~200
+ *           （本版本常规怪上限 131，再往上基本都是 BOSS / 活动图）。 */
+var HUNT_MAPS = [
+/*@HUNT_MAPS@*/
+];
+
+/* 召唤怪物-全级别段：[[段名, [[怪物ID, 中文名, 等级], ...]], ...]
+ * 数据来源：服务端 Mob.wz 全量导出（1562 只）+ String.wz/Mob.img 中文名，
+ *           剔除 info/boss != 0 的 BOSS 后剩 1067 只，按 info/level 切成 13 段（Lv.1-10 ~ Lv.121 以上）。
+ *           召唤用 map.spawnMonsterOnGroundBelow：自动贴地、自由行动（不冻结）。 */
+var MOB_TIERS_ALL = /*@MOB_TIERS_ALL@*/;
 
 /* 屏幕特效（showEffect -> ENVIRONMENT_CHANGE mode=3）
  * 取值全部来自服务端源码 / 官方脚本里【已经在用】的字符串（grep 到 9 个），
@@ -228,50 +268,81 @@ var MAX_SEARCH_HITS = 40;
 
 /* ================= 菜单文本 ================= */
 
+/* 菜单文字的排版规矩（09-25 定死，以后改菜单别破）：
+ *   1) 每个可点选项一律写成 "#b#L<n>#文字#k#l\r\n"
+ *      —— 结尾的 #l 才是「选项结束」；少了它，后面那行普通文字也会被算进这个
+ *         选项的可点区域，现象就是「分区标题和上一行功能一起亮」。
+ *      —— #b 统一染蓝，#k 把颜色还原，所以蓝的只有选项本行。
+ *   2) 分区标题 / 说明行一律 "#k--- 数值 ---\r\n"，靠 #k 不被染蓝。
+ *   3) 别拿 #n 当选项收尾：#n 是在选项内部换行，同样会撑大可点区域。
+ *   4) 不要用 #r（红色），整份菜单只有蓝色一种点击色。
+ *   5) 【09-25 下午补】光靠 #l 还不够：客户端里一个选项的高亮/点击方块会往下多占
+ *      一行，所以「分区标题」这类普通文字行【绝对不能紧贴在上一个选项下面】，
+ *      否则标题会被上一行的方块盖住，看着就是"标题和上一行功能重叠/一起亮"。
+ *      → 凡是选项行下面紧跟普通文字行的，中间必须插一个空行：
+ *          s += "#b#Lx#功能#k#l\r\n";
+ *          s += "\r\n";                       ← 空行，去被上一行的方块吃掉
+ *          s += "#k--- 分区标题 ---\r\n";
+ *      全仓库官方脚本里，"#l" 行后面紧跟普通文字行的情况是 0 例（全是选项），
+ *      说明官方也躲着这个坑走。插空行的活儿用 tools/fix_header_gap3.py（已跑过）。
+ * 官方 NPC 脚本就是这个写法，例：1300013.js  "#bKing Pepe#k and #bYeti Brothers#k.#l"
+ * 校验脚本：tools/check_menu_style.py
+ */
+
 /* 主菜单（32 项）。每个功能都在这层，不再有「更多功能」二级入口。
-   ⚠️ 新增功能一律【加到末尾】，「关闭菜单」永远是最后一项（现为 #L31#）。
+   ⚠️ 新增功能一律【加到末尾】，「关闭菜单」永远是最后一项（现为 #L32#）。
       编号一经发布就不要插队改号 —— 改号会让 dispatch 里的 selection 判断全部错位。 */
 function mainMenu() {
     var map = cm.getMap();
     var s = "#e[GM 功能菜单]#n  " + map.getMapName() + "（" + map.getId() + "）\r\n";
-    s += "--- 数值 ---\r\n";
-    s += "#L0#加经验 100 万\r\n";
-    s += "#L1#加经验 1 亿（直接升级）\r\n";
-    s += "#L2#加金币 1 亿\r\n";
-    s += "#L3#洗属性点（重置为初始属性）\r\n";
-    s += "#L4##b修改属性点（自定 STR/DEX/INT/LUK）#n\r\n";
-    s += "#L5#满技能（本职业全部技能练满）\r\n";
-    s += "#L6#加人气 +100\r\n";
-    s += "--- 职业 ---\r\n";
-    s += "#L7#修改职业（点选 / 输入编号）\r\n";
-    s += "#L8#学习技能（点选 / 输入ID）\r\n";
-    s += "--- 物品 / 背包 ---\r\n";
-    s += "#L9##b获取物品（点选 / 输入ID）#n\r\n";
-    s += "#L10#扩充背包（选栏位类型）\r\n";
-    s += "#L11#上 BUFF（输入道具ID，不消耗）\r\n";
-    s += "--- 移动 / 角色 ---\r\n";
-    s += "#L12#传送地图（猎场 / BOSS / 城镇）\r\n";
-    s += "#L13#隐身 / 现身\r\n";
-    s += "#L14#去自由市场\r\n";
-    s += "#L15#回满 HP / MP\r\n";
-    s += "#L16#当前地图信息\r\n";
-    s += "--- 怪物 / 地面 ---\r\n";
-    s += "#L17#捡取全图物品（全屏捡物）\r\n";
-    s += "#L18#吸取全图怪物（全拉到脚下）\r\n";
-    s += "#L19#生成怪物（输入 ID + 数量）\r\n";
-    s += "#L20#清空本图怪物（无掉落）\r\n";
-    s += "#L21#清空本图怪物（有掉落）\r\n";
-    s += "#L22#清理地上掉落物\r\n";
-    s += "--- 新增 ---\r\n";
-    s += "#L23#加经验（自定义数值）\r\n";
-    s += "#L24#加金币（自定义数值）\r\n";
-    s += "#L25#召唤 BOSS（点选，" + countBoss() + " 只）\r\n";
-    s += "#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）\r\n";
-    s += "#L27#背包管理（一键按栏位清理）\r\n";
-    s += "#L28#召唤怪物-点名(101~131)（" + MOB_POINTS_101_131.length + " 只）\r\n";
-    s += "#L29#伤害倍率（当前 ×" + cm.getPlayer().getDmgMultiplier() + "）\r\n";
-    s += "#L30#攻击速度爆发（速效激发 x-8 最快档，约 9 小时）\r\n";
-    s += "#L31#关闭菜单";
+    s += "#k--- 数值 ---\r\n";
+    s += "#b#L0#加经验 100 万#k#l\r\n";
+    s += "#b#L1#加经验 1 亿（直接升级）#k#l\r\n";
+    s += "#b#L2#加金币 1 亿#k#l\r\n";
+    s += "#b#L3#洗属性点（重置为初始属性）#k#l\r\n";
+    s += "#b#L4##b修改属性点（自定 STR/DEX/INT/LUK）#k#l\r\n";
+    s += "#b#L5#满技能（本职业全部技能练满）#k#l\r\n";
+    s += "#b#L6#加人气 +100#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 职业 ---\r\n";
+    s += "#b#L7#修改职业（点选 / 输入编号）#k#l\r\n";
+    s += "#b#L8#学习技能（点选 / 输入ID）#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 物品 / 背包 ---\r\n";
+    s += "#b#L9##b获取物品（点选 / 输入ID）#k#l\r\n";
+    s += "#b#L10#扩充背包（选栏位类型）#k#l\r\n";
+    s += "#b#L11#上 BUFF（输入道具ID，不消耗）#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 移动 / 角色 ---\r\n";
+    s += "#b#L12#传送地图（猎场 / BOSS / 城镇）#k#l\r\n";
+    s += "#b#L13#隐身 / 现身#k#l\r\n";
+    s += "#b#L14#去自由市场#k#l\r\n";
+    s += "#b#L15#回满 HP / MP#k#l\r\n";
+    s += "#b#L16#当前地图信息#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 怪物 / 地面 ---\r\n";
+    s += "#b#L17#捡取全图物品（全屏捡物）#k#l\r\n";
+    s += "#b#L18#吸取全图怪物（全拉到脚下）#k#l\r\n";
+    s += "#b#L19#生成怪物（输入 ID + 数量）#k#l\r\n";
+    s += "#b#L20#清空本图怪物（无掉落）#k#l\r\n";
+    s += "#b#L21#清空本图怪物（有掉落）#k#l\r\n";
+    s += "#b#L22#清理地上掉落物#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 新增 ---\r\n";
+    s += "#b#L23#加经验（自定义数值）#k#l\r\n";
+    s += "#b#L24#加金币（自定义数值）#k#l\r\n";
+    s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
+    s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
+    s += "#b#L27#背包管理（一键按栏位清理）#k#l\r\n";
+    s += "#b#L28#召唤怪物-点名(101~131)（" + MOB_POINTS_101_131.length + " 只）#k#l\r\n";
+    s += "#b#L29#伤害倍率（当前 ×" + cm.getPlayer().getDmgMultiplier() + "）#k#l\r\n";
+    s += "#b#L30#攻击速度爆发（速效激发 x-8 最快档，约 9 小时）#k#l\r\n";
+    var _totMob = 0;
+    for (var _mi = 0; _mi < MOB_TIERS_ALL.length; _mi++) {
+        _totMob += MOB_TIERS_ALL[_mi][1].length;
+    }
+    s += "#b#L31#召唤怪物-全级别段（" + MOB_TIERS_ALL.length + " 段 / " + _totMob + " 只）#k#l\r\n";
+    s += "#b#L32#关闭菜单#k#l";
     return s;
 }
 
@@ -286,10 +357,10 @@ function topMenu() {
 function familyMenu() {
     var s = "#e[修改职业 - 选择职业大系]#n\r\n";
     for (var i = 0; i < FAMILIES.length; i++) {
-        s += "#L" + i + "#" + FAMILIES[i] + "系（" + JOBS[FAMILIES[i]].length + " 个职业）\r\n";
+        s += "#b#L" + i + "#" + FAMILIES[i] + "系（" + JOBS[FAMILIES[i]].length + " 个职业）#k#l\r\n";
     }
-    s += "#L" + FAMILIES.length + "##r直接输入职业编号#n\r\n";
-    s += "#L" + (FAMILIES.length + 1) + "##b返回主菜单#n";
+    s += "#b#L" + FAMILIES.length + "#b直接输入职业编号#k#l\r\n";
+    s += "#b#L" + (FAMILIES.length + 1) + "##b返回主菜单#k#l";
     return s;
 }
 
@@ -298,9 +369,9 @@ function jobMenu(fam) {
     var list = JOBS[fam];
     var s = "#e[修改职业 - " + fam + "系]#n\r\n";
     for (var i = 0; i < list.length; i++) {
-        s += "#L" + i + "#" + list[i][0] + "  " + list[i][1] + "（" + jobTier(list[i][0]) + "）\r\n";
+        s += "#b#L" + i + "#" + list[i][0] + "  " + list[i][1] + "（" + jobTier(list[i][0]) + "）#k#l\r\n";
     }
-    s += "#L" + list.length + "##b返回大系选择#n";
+    s += "#b#L" + list.length + "##b返回大系选择#k#l";
     return s;
 }
 
@@ -308,44 +379,69 @@ function jobMenu(fam) {
 function attrMenu() {
     var chr = cm.getPlayer();
     var s = "#e[修改属性点]#n   剩余AP：" + chr.getRemainingAp() + "\r\n";
-    s += "当前：力 " + chr.getStr() + " / 敏 " + chr.getDex() +
+    s += "#k当前：力 " + chr.getStr() + " / 敏 " + chr.getDex() +
          " / 智 " + chr.getInt() + " / 运 " + chr.getLuk() + "\r\n";
-    s += "#L0#直接设定四项数值（力 敏 智 运）\r\n";
-    s += "#L1#增加剩余 AP\r\n";
-    s += "#L2#一键满属性（四项设成同一个值）\r\n";
-    s += "#L3##b返回主菜单#n";
+    s += "#b#L0#直接设定四项数值（力 敏 智 运）#k#l\r\n";
+    s += "#b#L1#增加剩余 AP#k#l\r\n";
+    s += "#b#L2#一键满属性（四项设成同一个值）#k#l\r\n";
+    s += "#b#L3##b返回主菜单#k#l";
     return s;
 }
 
 /* 传送菜单 */
 function warpMenu() {
     var s = "#e[传送地图]#n\r\n";
-    s += "#L0#输入地图ID\r\n";
-    s += "#L1#高等级猎场（" + HUNT_MAPS.length + " 个，怪 Lv.100~131）\r\n";
-    s += "#L2#BOSS 挑战图（" + BOSS_MAPS.length + " 个）\r\n";
-    s += "#L3#常用城镇（" + TOWN_MAPS.length + " 个）\r\n";
-    s += "#L4##b返回主菜单#n";
+    s += "#b#L0#输入地图ID#k#l\r\n";
+    s += "#b#L1#BOSS 挑战图（" + BOSS_MAPS.length + " 个）#k#l\r\n";
+    s += "#b#L2#全部城镇（" + TOWN_MAPS_ALL.length + " 个，含常用的 14 个 + wz 全量精选）#k#l\r\n";
+    s += "#b#L3#Lv.100 以上练级场（" + HUNT_MAPS.length + " 个，怪 Lv.100~200）#k#l\r\n";
+    s += "#b#L4##b返回主菜单#k#l";
     return s;
 }
 
-/* 地图列表菜单（curList 决定内容） */
+/* 传送菜单各档位的标题（下标 = warpMenu 里的 #L 编号） */
+var WARP_TITLES = ["", "BOSS 挑战图", "全部城镇", "Lv.100 以上练级场"];
+
+/* 地图列表菜单（curList 决定内容，按 MAP_PAGE 分页）
+ * 行号规则：本页第 n 项 = #L n；还有下一页时 #L MAP_PAGE = 下一页；永远 #L MAP_PAGE+1 = 返回。
+ * 注意：地图行最多占 0 ~ MAP_PAGE-1，别和"下一页/返回"撞号。 */
 function spotMenu(title) {
+    curTitle = title;
     var s = "#e[" + title + "]#n\r\n";
-    for (var i = 0; i < curList.length; i++) {
-        s += "#L" + i + "#" +
-             (curList[i][2] > 0 ? ("Lv." + curList[i][2] + " ") : "") +
-             curList[i][1] + " (" + curList[i][0] + ")\r\n";
+    var start = MAP_PAGE_NO * MAP_PAGE;
+    var n = curList.length;
+    var end = Math.min(start + MAP_PAGE, n);
+    for (var i = start; i < end; i++) {
+        var row = curList[i];
+        var txt;
+        if (row.length > 3) {
+            /* BOSS 图：把这张图刷的 BOSS 直接写出来，传送过去有没有 BOSS 一眼可见 */
+            txt = row[1] + "（" + row[3] + "）";
+        } else {
+            txt = (row[2] > 0 ? ("Lv." + row[2] + " ") : "") + row[1] + " (" + row[0] + ")";
+        }
+        s += "#b#L" + (i - start) + "#" + txt + "#k#l\r\n";
     }
-    s += "#L" + curList.length + "##b返回传送菜单#n";
+    if (end < n) {
+        var pages = Math.ceil(n / MAP_PAGE);
+        s += "#b#L" + MAP_PAGE + "#下一页（第 " + (MAP_PAGE_NO + 1) + " / " + pages + " 页）#k#l\r\n";
+    }
+    s += "#b#L" + (MAP_PAGE + 1) + "##b返回传送菜单#k#l";
     return s;
+}
+
+/* 当前页的起止下标，翻页/传送时用它把 selection 换算成真实下标 */
+function spotRange() {
+    var start = MAP_PAGE_NO * MAP_PAGE;
+    return [start, Math.min(start + MAP_PAGE, curList.length)];
 }
 
 function bagMenu() {
     var s = "#e[扩充背包]#n  每次 +" + BAG_SLOTS_PER_USE + " 格\r\n";
     for (var i = 0; i < BAG_TYPES.length; i++) {
-        s += "#L" + i + "#" + BAG_TYPES[i][1] + "（现在 " + cm.getPlayer().getSlots(BAG_TYPES[i][0]) + " 格）\r\n";
+        s += "#b#L" + i + "#" + BAG_TYPES[i][1] + "（现在 " + cm.getPlayer().getSlots(BAG_TYPES[i][0]) + " 格）#k#l\r\n";
     }
-    s += "#L" + BAG_TYPES.length + "##b返回主菜单#n";
+    s += "#b#L" + BAG_TYPES.length + "##b返回主菜单#k#l";
     return s;
 }
 
@@ -570,20 +666,20 @@ function skillGroupMenu() {
     var jobId = myJobId();
     var chain = jobChainOf(jobId);
     var s = "#e[学习技能]#n　当前职业：" + jobName(jobId) + "（" + jobId + "）\r\n";
-    s += "点一行 = 展开该职业的技能列表，再点技能 = 直接练满\r\n";
-    s += "★ = 本职业链（技能窗口能看到）　○ = 跨职业（窗口看不到）\r\n";
-    s += "本表收的是各职业【四转】技能 + 轻功；本职业 1~4 转全技能请用主菜单「满技能」\r\n\r\n";
+    s += "#k点一行 = 展开该职业的技能列表，再点技能 = 直接练满\r\n";
+    s += "#k★ = 本职业链（技能窗口能看到）　○ = 跨职业（窗口看不到）\r\n";
+    s += "#k本表收的是各职业【四转】技能 + 轻功；本职业 1~4 转全技能请用主菜单「满技能」\r\n\r\n";
 
     curOrder = orderedSkillGroups();
     for (var i = 0; i < curOrder.length; i++) {
         var g = SKILL_GROUPS[curOrder[i]];
-        s += "#L" + i + "#" + ((g[0] > 0 && inArray(chain, g[0])) ? "★ " : "○ ") +
-             g[1] + "　" + g[2].length + " 个\r\n";
+        s += "#b#L" + i + "#" + ((g[0] > 0 && inArray(chain, g[0])) ? "★ " : "○ ") +
+             g[1] + "　" + g[2].length + " 个#l\r\n";
     }
     var n = curOrder.length;
-    s += "#L" + n + "##b手动输入技能ID#n\r\n";
-    s += "#L" + (n + 1) + "##b我学到的技能清单#n\r\n";
-    s += "#L" + (n + 2) + "##r返回主菜单#n";
+    s += "#b#L" + n + "##b手动输入技能ID#k#l\r\n";
+    s += "#b#L" + (n + 1) + "##b我学到的技能清单#k#l\r\n";
+    s += "#b#L" + (n + 2) + "#b返回主菜单#k#l";
     status = 3;
     cm.sendSimple(s);
 }
@@ -619,16 +715,16 @@ function skillListMenu(gi) {
         s += inArray(chain, g[0]) ? "★ 这组在你当前职业链内，技能窗口能看到\r\n"
                                   : "○ 这组是别的职业的，学会了技能窗口也不显示（要先转职）\r\n";
     } else {
-        s += "○ 跨职业常用技能，客户端技能窗口不显示（服务端照样生效）\r\n";
+        s += "#k○ 跨职业常用技能，客户端技能窗口不显示（服务端照样生效）\r\n";
     }
-    s += "#e点一行 = 直接练满#n\r\n\r\n";
+    s += "#k#e点一行 = 直接练满#n\r\n\r\n";
     for (var i = 0; i < g[2].length; i++) {
-        s += "#L" + i + "#" + g[2][i][0] + " " + g[2][i][1] + "\r\n";
+        s += "#b#L" + i + "#" + g[2][i][0] + " " + g[2][i][1] + "#k#l\r\n";
     }
     var n = g[2].length;
-    s += "#L" + n + "##b本组全部练满（" + n + " 个）#n\r\n";
-    s += "#L" + (n + 1) + "##b手动输入技能ID#n\r\n";
-    s += "#L" + (n + 2) + "##r返回技能菜单#n";
+    s += "#b#L" + n + "##b本组全部练满（" + n + " 个）#k#l\r\n";
+    s += "#b#L" + (n + 1) + "##b手动输入技能ID#k#l\r\n";
+    s += "#b#L" + (n + 2) + "#b返回技能菜单#k#l";
     status = 30;
     cm.sendSimple(s);
 }
@@ -648,10 +744,10 @@ function skillInputMenu() {
         eg = "1321000 1321001";
     }
     var s = "#e[学习技能 - 手动输入]#n\r\n";
-    s += "输入技能ID后点确定，直接练到满级\r\n";
-    s += "可一次多个，用空格或逗号分隔\r\n\r\n";
-    s += "例：" + eg + "\r\n";
-    s += "不属于本职业的技能学了也不显示在技能窗口，但服务端生效";
+    s += "#k输入技能ID后点确定，直接练到满级\r\n";
+    s += "#k可一次多个，用空格或逗号分隔\r\n\r\n";
+    s += "#k例：" + eg + "\r\n";
+    s += "#k不属于本职业的技能学了也不显示在技能窗口，但服务端生效";
     status = 31;
     cm.sendGetText(s);
 }
@@ -681,21 +777,21 @@ function mySkillMenu() {
     }
 
     var s = "#e[我学到的技能]#n　共 " + ids.length + " 个\r\n";
-    s += "★ = 本职业链（技能窗口能看到）　☆ = 通用/初心者技能　○ = 跨职业，不显示\r\n\r\n";
+    s += "#k★ = 本职业链（技能窗口能看到）　☆ = 通用/初心者技能　○ = 跨职业，不显示\r\n\r\n";
     var k;
     if (vis.length == 0) {
-        s += "（当前没有技能窗口能显示的技能）\r\n";
+        s += "#k（当前没有技能窗口能显示的技能）\r\n";
     }
     for (k = 0; k < vis.length; k++) {
-        s += "★ " + vis[k] + " " + skillName(vis[k]) + "  Lv." + p.getSkillLevel(vis[k]) + "\r\n";
+        s += "#k★ " + vis[k] + " " + skillName(vis[k]) + "  Lv." + p.getSkillLevel(vis[k]) + "\r\n";
     }
     for (k = 0; k < com.length; k++) {
-        s += "☆ " + com[k] + " " + skillName(com[k]) + "  Lv." + p.getSkillLevel(com[k]) + "\r\n";
+        s += "#k☆ " + com[k] + " " + skillName(com[k]) + "  Lv." + p.getSkillLevel(com[k]) + "\r\n";
     }
     for (k = 0; k < hid.length; k++) {
-        s += "○ " + hid[k] + " " + skillName(hid[k]) + "  Lv." + p.getSkillLevel(hid[k]) + "\r\n";
+        s += "#k○ " + hid[k] + " " + skillName(hid[k]) + "  Lv." + p.getSkillLevel(hid[k]) + "\r\n";
     }
-    s += "\r\n#L0##r返回技能菜单#n";
+    s += "\r\n#b#L0#b返回技能菜单#k#l";
     status = 32;
     cm.sendSimple(s);
 }
@@ -764,8 +860,8 @@ function learnSkills(text) {
 
 function itemGroupMenu() {
     var s = "#e[获取物品]#n\r\n";
-    s += "点一行 = 展开该部位的物品列表，再点物品 = 直接获得\r\n";
-    s += "一次要多个 / 要别的ID：用最下面「手动输入」\r\n\r\n";
+    s += "#k点一行 = 展开该部位的物品列表，再点物品 = 直接获得\r\n";
+    s += "#k一次要多个 / 要别的ID：用最下面「手动输入」\r\n\r\n";
     for (var i = 0; i < ITEM_GROUPS.length; i++) {
         var g = ITEM_GROUPS[i];
         var star = 0;
@@ -774,13 +870,13 @@ function itemGroupMenu() {
                 star++;
             }
         }
-        s += "#L" + i + "#[" + g[0] + "] " + g[1].length + " 项" +
-             (star > 0 ? "（含 " + star + " 项 150+）" : "") + "\r\n";
+        s += "#b#L" + i + "#[" + g[0] + "] " + g[1].length + " 项" +
+             (star > 0 ? "（含 " + star + " 项 150+）" : "") + "#l\r\n";
     }
     var n = ITEM_GROUPS.length;
-    s += "#L" + n + "##b手动输入物品ID（可带数量）#n\r\n";
-    s += "#L" + (n + 1) + "##b按名字搜索物品（输入中文关键字）#n\r\n";
-    s += "#L" + (n + 2) + "##r返回主菜单#n";
+    s += "#b#L" + n + "##b手动输入物品ID（可带数量）#k#l\r\n";
+    s += "#b#L" + (n + 1) + "##b按名字搜索物品（输入中文关键字）#k#l\r\n";
+    s += "#b#L" + (n + 2) + "#b返回主菜单#k#l";
     status = 7;
     cm.sendSimple(s);
 }
@@ -790,14 +886,14 @@ function itemListMenu(gi) {
     curGroup = gi;
     var g = ITEM_GROUPS[gi];
     var s = "#e[获取物品 - " + g[0] + "]#n　共 " + g[1].length + " 项\r\n";
-    s += "#e点一行 = 直接获得#n（★ = 150 级以上 / GM 专用）\r\n\r\n";
+    s += "#k#e点一行 = 直接获得#n（★ = 150 级以上 / GM 专用）\r\n\r\n";
     for (var i = 0; i < g[1].length; i++) {
-        s += "#L" + i + "#" + g[1][i][0] + " " + g[1][i][1] +
-             (g[1][i][2] > 1 ? "（每次 " + g[1][i][2] + " 个）" : "") + "\r\n";
+        s += "#b#L" + i + "#" + g[1][i][0] + " " + g[1][i][1] +
+             (g[1][i][2] > 1 ? "（每次 " + g[1][i][2] + " 个）" : "") + "#l\r\n";
     }
     var n = g[1].length;
-    s += "#L" + n + "##b手动输入物品ID（可带数量）#n\r\n";
-    s += "#L" + (n + 1) + "##r返回物品菜单#n";
+    s += "#b#L" + n + "##b手动输入物品ID（可带数量）#k#l\r\n";
+    s += "#b#L" + (n + 1) + "#b返回物品菜单#k#l";
     status = 70;
     cm.sendSimple(s);
 }
@@ -805,11 +901,11 @@ function itemListMenu(gi) {
 /* 物品手动输入（同技能：列表和输入框不能同屏） */
 function itemInputMenu() {
     var s = "#e[获取物品 - 手动输入]#n\r\n";
-    s += "格式：物品ID 数量，数量不写就默认 1 个\r\n";
-    s += "多组用逗号隔开\r\n\r\n";
-    s += "例：2000005 100（超级药水 100 个）\r\n";
-    s += "例：1142009 1, 1382049 1\r\n";
-    s += "例：4001006 1（ID 随便填，只要 wz 里有）";
+    s += "#k格式：物品ID 数量，数量不写就默认 1 个\r\n";
+    s += "#k多组用逗号隔开\r\n\r\n";
+    s += "#k例：2000005 100（超级药水 100 个）\r\n";
+    s += "#k例：1142009 1, 1382049 1\r\n";
+    s += "#k例：4001006 1（ID 随便填，只要 wz 里有）";
     status = 71;
     cm.sendGetText(s);
 }
@@ -1182,12 +1278,12 @@ function gainMesoCustom(text) {
 
 function bossTierMenu() {
     var s = "#e[召唤 BOSS]#n\r\n";
-    s += "选一档 -> 再点某一行 = 在你面前召唤它\r\n";
-    s += "会自动贴地，不会出现悬空怪\r\n\r\n";
+    s += "#k选一档 -> 再点某一行 = 在你面前召唤它\r\n";
+    s += "#k会自动贴地，不会出现悬空怪\r\n\r\n";
     for (var i = 0; i < BOSS_TIERS.length; i++) {
-        s += "#L" + i + "#" + BOSS_TIERS[i][0] + "（" + BOSS_TIERS[i][1].length + " 只）\r\n";
+        s += "#b#L" + i + "#" + BOSS_TIERS[i][0] + "（" + BOSS_TIERS[i][1].length + " 只）#k#l\r\n";
     }
-    s += "#L" + BOSS_TIERS.length + "##b返回主菜单#n";
+    s += "#b#L" + BOSS_TIERS.length + "##b返回主菜单#k#l";
     status = 35;
     cm.sendSimple(s);
 }
@@ -1199,13 +1295,13 @@ function bossListMenu(ti) {
         return;
     }
     var s = "#e[召唤 BOSS - " + g[0] + "]#n\r\n";
-    s += "点一行 = 直接召唤（可以接着点）\r\n\r\n";
+    s += "#k点一行 = 直接召唤（可以接着点）\r\n\r\n";
     for (var i = 0; i < g[1].length; i++) {
         var b = g[1][i];
-        s += "#L" + i + "#" + b[1] + "  Lv." + b[2] + "（HP " + b[3] + "）\r\n";
+        s += "#b#L" + i + "#" + b[1] + "  Lv." + b[2] + "（HP " + b[3] + "）#k#l\r\n";
     }
-    s += "#L" + g[1].length + "##b换一档#n   ";
-    s += "#L" + (g[1].length + 1) + "##r返回主菜单#n";
+    s += "#b#L" + g[1].length + "##b换一档#k#l\r\n";
+    s += "#b#L" + (g[1].length + 1) + "#b返回主菜单#k#l";
     status = 36;
     cm.sendSimple(s);
 }
@@ -1302,13 +1398,16 @@ function summonZakum(pos) {
                         monsterKilled: function(aniTime) {
                             chr.getMap().broadcastZakumVictory();
                         },
-                        monsterDamaged: function(from, trueDmg) {}
+                        monsterDamaged: function(from, trueDmg) {},
+                        monsterHealed: function(trueHeal) {}
                     });
                 },
-                monsterDamaged: function(from, trueDmg) {}
+                monsterDamaged: function(from, trueDmg) {},
+                monsterHealed: function(trueHeal) {}
             });
         },
-        monsterDamaged: function(from, trueDmg) {}
+        monsterDamaged: function(from, trueDmg) {},
+        monsterHealed: function(trueHeal) {}
     });
 
     cm.dropMessage(5, "[GM] 已召唤扎昆（分段副本）：先清 8 条手臂，再依次击败 3 个形态");
@@ -1318,14 +1417,14 @@ function summonZakum(pos) {
 
 function mobPointMenu() {
     var s = "#e[召唤怪物 - 点名 101~131]#n\r\n";
-    s += "点一行 = 召唤该怪到面前（自由行动，不冻结）\r\n";
-    s += "可接着点；「全部召唤」一次性把 " + MOB_POINTS_101_131.length + " 只全拉来\r\n\r\n";
+    s += "#k点一行 = 召唤该怪到面前（自由行动，不冻结）\r\n";
+    s += "#k可接着点；「全部召唤」一次性把 " + MOB_POINTS_101_131.length + " 只全拉来\r\n\r\n";
     for (var i = 0; i < MOB_POINTS_101_131.length; i++) {
         var m = MOB_POINTS_101_131[i];
-        s += "#L" + i + "#" + m[1] + "  Lv." + m[2] + "\r\n";
+        s += "#b#L" + i + "#" + m[1] + "  Lv." + m[2] + "#k#l\r\n";
     }
-    s += "#L" + MOB_POINTS_101_131.length + "##b全部召唤（" + MOB_POINTS_101_131.length + " 只）#n   ";
-    s += "#L" + (MOB_POINTS_101_131.length + 1) + "##r返回主菜单#n";
+    s += "#b#L" + MOB_POINTS_101_131.length + "##b全部召唤（" + MOB_POINTS_101_131.length + " 只）#k#l\r\n";
+    s += "#b#L" + (MOB_POINTS_101_131.length + 1) + "#b返回主菜单#k#l";
     status = 47;
     cm.sendSimple(s);
 }
@@ -1380,6 +1479,133 @@ function summonMobPointsAll() {
     cm.dropMessage(5, "[GM] 已尝试召唤 " + ok + "/" + n + " 只（地图容量满时部分不现身，属正常）");
 }
 
+/* ---- 召唤怪物-全级别段（Lv.1-10 ~ Lv.121 以上，共 13 段）----
+ * 和上面的「点名 101~131」是两套：点名是老功能（只有 101 级以上的普通怪），
+ * 这里是按等级段整体铺开，每一段都能「点一行召唤一只」，也能「一次性整段拉来」。 */
+
+/* 选等级段 */
+function mobTierMenu() {
+    var s = "#e[召唤怪物 - 选择等级段]#n\r\n";
+    var tot = 0;
+    var j;
+    for (j = 0; j < MOB_TIERS_ALL.length; j++) {
+        tot += MOB_TIERS_ALL[j][1].length;
+    }
+    s += "#k共 " + MOB_TIERS_ALL.length + " 段 / " + tot + " 只普通怪（BOSS 已剔除）\r\n";
+    s += "#k点一段进去，可以逐只点名，也可以一次整段拉来\r\n\r\n";
+    for (j = 0; j < MOB_TIERS_ALL.length; j++) {
+        s += "#b#L" + j + "#" + MOB_TIERS_ALL[j][0] + "（" + MOB_TIERS_ALL[j][1].length + " 只）#k#l\r\n";
+    }
+    s += "#b#L" + MOB_TIERS_ALL.length + "#b返回主菜单#k#l";
+    curMobPage = 0;                         /* 换档时页号归零 */
+    status = 49;
+    cm.sendSimple(s);
+}
+
+/* 段内列表：点一行召唤一只；末尾三行 = 本段全部召唤 / 换段 / 回主菜单 */
+function mobTierListMenu(ti) {
+    if (ti < 0 || ti >= MOB_TIERS_ALL.length) {
+        mobTierMenu();
+        return;
+    }
+    curMobTier = ti;
+    var g = MOB_TIERS_ALL[ti];
+    var list = g[1];
+    var n = list.length;
+    var totalPage = Math.ceil(n / MOB_PAGE);
+    if (curMobPage >= totalPage) {
+        curMobPage = totalPage - 1;
+    }
+    if (curMobPage < 0) {
+        curMobPage = 0;
+    }
+    var from = curMobPage * MOB_PAGE;
+    var to = from + MOB_PAGE;
+    if (to > n) {
+        to = n;
+    }
+    var hasNext = curMobPage + 1 < totalPage;
+    var i;
+    var s = "#e[召唤怪物 - " + g[0] + "  " + (curMobPage + 1) + "/" + totalPage +
+            " 页（第 " + (from + 1) + "~" + to + " 只）]#n\r\n";
+    s += "#k点一行 = 召唤 1 只到面前（自由行动，不冻结），可接着点\r\n";
+    s += "#k地图容量满了的话超出的不现身（不报错）\r\n\r\n";
+    for (i = from; i < to; i++) {
+        s += "#b#L" + (i - from) + "#" + list[i][1] + "  Lv." + list[i][2] + "#k#l\r\n";
+    }
+    /* 末三行的编号固定：MOB_PAGE = 下一页 或 本段全部召唤，+1 换段，+2 返回。
+     * 怪物行只占 0 ~ MOB_PAGE-1，跟末三行不会撞号。 */
+    if (hasNext) {
+        s += "#b#L" + MOB_PAGE + "##b下一页（第 " + (curMobPage + 2) + "/" + totalPage + " 页）#k#l\r\n";
+    } else {
+        s += "#b#L" + MOB_PAGE + "##b本段全部召唤（" + n + " 只）#k#l\r\n";
+    }
+    s += "#b#L" + (MOB_PAGE + 1) + "##b换一个等级段#k#l\r\n";
+    s += "#b#L" + (MOB_PAGE + 2) + "#b返回主菜单#k#l";
+    status = 50;
+    cm.sendSimple(s);
+}
+
+/* 召唤段内第 idx 只，留在原地可以接着点 */
+function summonMobTierOne(idx) {
+    var g = MOB_TIERS_ALL[curMobTier];
+    if (g == null) {
+        return;
+    }
+    var m = g[1][idx];
+    if (m == null) {
+        return;
+    }
+    var map = cm.getMap();
+    var pos = cm.getPlayer().getPosition();
+    var ok = false;
+    try {
+        map.spawnMonsterOnGroundBelow(m[0], pos.x + 60, pos.y);
+        ok = true;
+    } catch (e1) {
+        try {
+            map.spawnMonsterOnGroundBelow(m[0], pos.x, pos.y);
+            ok = true;
+        } catch (e2) {
+            ok = false;
+        }
+    }
+    if (ok) {
+        cm.dropMessage(5, "[GM] 已召唤 " + m[1] + "（" + m[0] + " Lv." + m[2] + "）");
+    } else {
+        cm.dropMessage(5, "[GM] 召唤失败：这里找不到可落脚的平台，站到平地中间再试");
+    }
+}
+
+/* 整段召唤：横向错开避免叠在同一格；单只失败不影响其它 */
+function summonMobTierAll() {
+    var g = MOB_TIERS_ALL[curMobTier];
+    if (g == null) {
+        return;
+    }
+    var list = g[1];
+    var n = list.length;
+    var map = cm.getMap();
+    var pos = cm.getPlayer().getPosition();
+    var ok = 0;
+    var i;
+    for (i = 0; i < n; i++) {
+        var m = list[i];
+        try {
+            try {
+                map.spawnMonsterOnGroundBelow(m[0], pos.x + 60 + (i % 12) * 24, pos.y);
+            } catch (e1) {
+                map.spawnMonsterOnGroundBelow(m[0], pos.x, pos.y);
+            }
+            ok++;
+        } catch (e2) {
+            /* 单只失败不影响其它 */
+        }
+    }
+    cm.dropMessage(5, "[GM] " + g[0] + "：已尝试召唤 " + ok + "/" + n +
+                      " 只（地图容量满时部分不现身，属正常）");
+}
+
 /* ================= 伤害倍率（GM） =================
  * 客户端单段显示封顶约 13.33 亿（客户端墙，改不了）。
  * 服务端在扣血前把客户端发来的伤害乘以倍率：实际掉血变 N 倍，显示数字不变。
@@ -1387,13 +1613,13 @@ function summonMobPointsAll() {
 function dmgMultMenu() {
     var cur = cm.getPlayer().getDmgMultiplier();
     var s = "#e[伤害倍率]#n  当前：#r×" + cur + "#n\r\n\r\n";
-    s += "实际扣血 = 客户端伤害 × 倍率（显示仍封顶 13.33 亿）\r\n";
-    s += "服务端会钳到 21.47 亿，任何怪都是一击必杀\r\n\r\n";
-    s += "#L0#×1（关闭放大）\r\n";
-    s += "#L1#×10\r\n";
-    s += "#L2#×100\r\n";
-    s += "#L3#×1000\r\n";
-    s += "#L4##b返回主菜单#n";
+    s += "#k实际扣血 = 客户端伤害 × 倍率（显示仍封顶 13.33 亿）\r\n";
+    s += "#k服务端会钳到 21.47 亿，任何怪都是一击必杀\r\n\r\n";
+    s += "#b#L0#×1（关闭放大）#k#l\r\n";
+    s += "#b#L1#×10#k#l\r\n";
+    s += "#b#L2#×100#k#l\r\n";
+    s += "#b#L3#×1000#k#l\r\n";
+    s += "#b#L4##b返回主菜单#k#l";
     status = 48;
     cm.sendSimple(s);
 }
@@ -1425,12 +1651,12 @@ function atkSpeedBuff() {
 
 function fxMenu() {
     var s = "#e[特效 / 播报]#n\r\n\r\n";
-    s += "#L0#全图滚动公告（输入文字）\r\n";
-    s += "#L1#屏幕特效（" + SCREEN_EFFECTS.length + " 种，只有自己看到）\r\n";
-    s += "#L2#地图特效（" + MAP_EFFECTS.length + " 种，全图可见）\r\n";
-    s += "#L3#地图倒计时（输入秒数）\r\n";
-    s += "#L4#头顶称号（输入文字）\r\n";
-    s += "#L5##b返回主菜单#n";
+    s += "#b#L0#全图滚动公告（输入文字）#k#l\r\n";
+    s += "#b#L1#屏幕特效（" + SCREEN_EFFECTS.length + " 种，只有自己看到）#k#l\r\n";
+    s += "#b#L2#地图特效（" + MAP_EFFECTS.length + " 种，全图可见）#k#l\r\n";
+    s += "#b#L3#地图倒计时（输入秒数）#k#l\r\n";
+    s += "#b#L4#头顶称号（输入文字）#k#l\r\n";
+    s += "#b#L5##b返回主菜单#k#l";
     status = 37;
     cm.sendSimple(s);
 }
@@ -1438,9 +1664,9 @@ function fxMenu() {
 function screenFxMenu() {
     var s = "#e[屏幕特效]#n\r\n只有自己看得到\r\n\r\n";
     for (var i = 0; i < SCREEN_EFFECTS.length; i++) {
-        s += "#L" + i + "#" + SCREEN_EFFECTS[i][0] + "\r\n";
+        s += "#b#L" + i + "#" + SCREEN_EFFECTS[i][0] + "#k#l\r\n";
     }
-    s += "#L" + SCREEN_EFFECTS.length + "##b返回#n";
+    s += "#b#L" + SCREEN_EFFECTS.length + "##b返回#k#l";
     status = 39;
     cm.sendSimple(s);
 }
@@ -1448,9 +1674,9 @@ function screenFxMenu() {
 function mapFxMenu() {
     var s = "#e[地图特效]#n\r\n全图所有人可见（FIELD_EFFECT）\r\n\r\n";
     for (var i = 0; i < MAP_EFFECTS.length; i++) {
-        s += "#L" + i + "#" + MAP_EFFECTS[i][0] + "\r\n";
+        s += "#b#L" + i + "#" + MAP_EFFECTS[i][0] + "#k#l\r\n";
     }
-    s += "#L" + MAP_EFFECTS.length + "##b返回#n";
+    s += "#b#L" + MAP_EFFECTS.length + "##b返回#k#l";
     status = 40;
     cm.sendSimple(s);
 }
@@ -1554,13 +1780,13 @@ function countClearTargets(bt) {
 
 function bagManageMenu() {
     var s = "#e[背包管理]#n\r\n";
-    s += "点一行 = 清理该栏位（会先让你确认一次）\r\n";
-    s += "只清【背包栏】；身上穿着的装备不受影响\r\n\r\n";
+    s += "#k点一行 = 清理该栏位（会先让你确认一次）\r\n";
+    s += "#k只清【背包栏】；身上穿着的装备不受影响\r\n\r\n";
     for (var i = 0; i < BAG_TYPES.length; i++) {
-        s += "#L" + i + "#清理" + BAG_TYPES[i][1] + "（现有 " + countBagItems(BAG_TYPES[i][0]) + " 件）\r\n";
+        s += "#b#L" + i + "#清理" + BAG_TYPES[i][1] + "（现有 " + countBagItems(BAG_TYPES[i][0]) + " 件）#k#l\r\n";
     }
-    s += "#L" + BAG_TYPES.length + "##r清理全部（不含装饰栏）#n\r\n";
-    s += "#L" + (BAG_TYPES.length + 1) + "##b返回主菜单#n";
+    s += "#b#L" + BAG_TYPES.length + "#b清理全部（不含装饰栏）#k#l\r\n";
+    s += "#b#L" + (BAG_TYPES.length + 1) + "##b返回主菜单#k#l";
     status = 43;
     cm.sendSimple(s);
 }
@@ -1570,22 +1796,22 @@ function bagClearConfirm(bt) {
     var what = (bt == 0) ? "全部栏位（不含装饰栏）" : bagTypeName(bt);
 
     var s = "#e[确认清理背包]#n\r\n\r\n";
-    s += "目标：" + what + "\r\n";
-    s += "将清掉 " + total + " 件物品\r\n\r\n";
+    s += "#k目标：" + what + "\r\n";
+    s += "#k将清掉 " + total + " 件物品\r\n\r\n";
 
     pendingBagType = bt;
     status = 44;
 
     if (total == 0) {
-        s += "这一栏本来就是空的，没什么可清。\r\n\r\n";
-        s += "#L1##b返回#n";
+        s += "#k这一栏本来就是空的，没什么可清。\r\n\r\n";
+        s += "#b#L1##b返回#k#l";
         cm.sendSimple(s);
         return;
     }
 
-    s += "#r此操作不可撤销，请再确认一次#n\r\n\r\n";
-    s += "#L0##r确认清理 " + total + " 件#n\r\n";
-    s += "#L1##b取消，返回#n";
+    s += "#k#r此操作不可撤销，请再确认一次#n\r\n\r\n";
+    s += "#b#L0#b确认清理 " + total + " 件#k#l\r\n";
+    s += "#b#L1##b取消，返回#k#l";
     cm.sendSimple(s);
 }
 
@@ -1601,7 +1827,6 @@ function doClearBag(bt) {
     var MIT = Packages.client.inventory.MapleInventoryType;
     var MIM = Packages.client.inventory.manipulator.MapleInventoryManipulator;
     var total = 0;
-    var failed = 0;
 
     for (var i = 0; i < BAG_TYPES.length; i++) {
         var t = BAG_TYPES[i][0];
@@ -1622,25 +1847,18 @@ function doClearBag(bt) {
             continue;
         }
 
-        var snap = [];
-        var it = inv.list().iterator();
-        while (it.hasNext()) {
-            snap.push(it.next());
+        if (invType == MIT.EQUIPPED) {
+            continue; // 安全护栏：绝不脱身上装备（服务端 removeAllItems 也有同样的 guard）
         }
 
-        for (var j = 0; j < snap.length; j++) {
-            var item = snap[j];
-            try {
-                MIM.removeFromSlot(client, invType, item.getPosition(), item.getQuantity(), false);
-                total++;
-            } catch (e) {
-                failed++;
-            }
-        }
+        var before = inv.list().size();
+        // 一次性批量删除 + 只发一个 modifyInventory 包，客户端轻松消化，不再卡
+        MIM.removeAllItems(client, invType, false);
+        var after = cm.getInventory(invType).list().size();
+        total += (before - after);
     }
 
-    cm.dropMessage(5, "[GM] 背包清理完成：清掉 " + total + " 件" +
-                      (failed > 0 ? "（失败 " + failed + " 件）" : ""));
+    cm.dropMessage(5, "[GM] 背包清理完成：清掉 " + total + " 件");
 }
 
 /* ---- B7：按名字搜物品 ---- */
@@ -1665,9 +1883,9 @@ function allItemPairs() {
 
 function itemSearchMenu() {
     var s = "#e[按名字搜物品]#n\r\n";
-    s += "输入物品名字的一段中文，例：超级 / 药水 / 卷轴\r\n";
-    s += "也可以直接输入物品ID（纯数字），那就直接给你\r\n\r\n";
-    s += "名字表来自服务端全量物品库：现金/消耗/装备/材料/设置/宠物";
+    s += "#k输入物品名字的一段中文，例：超级 / 药水 / 卷轴\r\n";
+    s += "#k也可以直接输入物品ID（纯数字），那就直接给你\r\n\r\n";
+    s += "#k名字表来自服务端全量物品库：现金/消耗/装备/材料/设置/宠物";
     status = 45;
     cm.sendGetText(s);
 }
@@ -1689,21 +1907,21 @@ function searchAndList(kw) {
 function itemSearchList() {
     var s = "#e[搜索结果：" + curHitsKw + "]#n\r\n";
     if (curHits == null || curHits.length == 0) {
-        s += "没有匹配的物品。\r\n";
-        s += "换个短一点的关键字试试，或者直接用「获取物品」输入 ID。\r\n\r\n";
-        s += "#L0##b重新搜索#n\r\n";
-        s += "#L1##b返回主菜单#n";
+        s += "#k没有匹配的物品。\r\n";
+        s += "#k换个短一点的关键字试试，或者直接用「获取物品」输入 ID。\r\n\r\n";
+        s += "#b#L0##b重新搜索#k#l\r\n";
+        s += "#b#L1##b返回主菜单#k#l";
         status = 46;
         cm.sendSimple(s);
         return;
     }
-    s += "共 " + curHits.length + " 条（一次最多列 " + MAX_SEARCH_HITS + " 条）\r\n";
-    s += "点一行 = 直接获得 1 个\r\n\r\n";
+    s += "#k共 " + curHits.length + " 条（一次最多列 " + MAX_SEARCH_HITS + " 条）\r\n";
+    s += "#k点一行 = 直接获得 1 个\r\n\r\n";
     for (var i = 0; i < curHits.length; i++) {
-        s += "#L" + i + "#" + curHits[i][0] + " " + curHits[i][1] + "\r\n";
+        s += "#b#L" + i + "#" + curHits[i][0] + " " + curHits[i][1] + "#k#l\r\n";
     }
-    s += "#L" + curHits.length + "##b重新搜索#n   ";
-    s += "#L" + (curHits.length + 1) + "##r返回主菜单#n";
+    s += "#b#L" + curHits.length + "##b重新搜索#k#l\r\n";
+    s += "#b#L" + (curHits.length + 1) + "#b返回主菜单#k#l";
     status = 46;
     cm.sendSimple(s);
 }
@@ -1848,6 +2066,9 @@ function action(mode, type, selection) {
                 atkSpeedBuff();
                 return;
             } else if (selection == 31) {
+                mobTierMenu();
+                return;
+            } else if (selection == 32) {
                 cm.dispose();
                 return;
             }
@@ -1933,26 +2154,46 @@ function action(mode, type, selection) {
                 return;
             }
             if (selection == 1) {
-                curList = HUNT_MAPS;
-            } else if (selection == 2) {
                 curList = BOSS_MAPS;
+                MAP_PAGE_NO = 0;
+            } else if (selection == 2) {
+                curList = TOWN_MAPS_ALL;      /* 第 11 轮起：常用城镇已并入这一档 */
+                MAP_PAGE_NO = 0;
             } else if (selection == 3) {
-                curList = TOWN_MAPS;
+                curList = HUNT_MAPS;          /* 第 10 轮起：猎场已并进这一档 */
+                MAP_PAGE_NO = 0;
             } else {
                 topMenu();
                 return;
             }
             status = 16;
-            cm.sendSimple(spotMenu(selection == 1 ? "高等级猎场" : (selection == 2 ? "BOSS 挑战图" : "常用城镇")));
+            cm.sendSimple(spotMenu(WARP_TITLES[selection]));
             return;
         }
 
-        /* ---- 传送地图：从列表里选一个 ---- */
+        /* ---- 传送地图：从列表里选一个（分页） ---- */
         if (status == 16) {
-            if (selection < curList.length) {
-                doWarp(curList[selection][0], curList[selection][1]);
+            var rng = spotRange();
+            if (selection == MAP_PAGE + 1) {
+                /* 返回传送菜单 */
+                MAP_PAGE_NO = 0;
+                curList = null;
+                status = 15;
+                cm.sendSimple(warpMenu());
+                return;
+            }
+            if (selection == MAP_PAGE && rng[1] < curList.length) {
+                /* 下一页（最后一页没有这个按钮，这里必定还有） */
+                MAP_PAGE_NO++;
+                status = 16;
+                cm.sendSimple(spotMenu(curTitle));
+                return;
+            }
+            if (selection >= 0 && selection < MAP_PAGE && rng[0] + selection < curList.length) {
+                doWarp(curList[rng[0] + selection][0], curList[rng[0] + selection][1]);
             } else {
                 status = 15;
+                curList = null;
                 cm.sendSimple(warpMenu());
                 return;
             }
@@ -2197,6 +2438,51 @@ function action(mode, type, selection) {
                 return;
             }
             topMenu();                       /* 返回主菜单 */
+            return;
+        }
+
+        /* ---- 召唤怪物-全级别段：选段 / 段内逐只 / 整段召唤 ---- */
+        if (status == 49) {
+            if (selection >= 0 && selection < MOB_TIERS_ALL.length) {
+                mobTierListMenu(selection);
+                return;
+            }
+            topMenu();                       /* 返回主菜单 */
+            return;
+        }
+
+        if (status == 50) {
+            var mg = MOB_TIERS_ALL[curMobTier];
+            if (mg != null) {
+                var ml = mg[1];
+                var totalPage = Math.ceil(ml.length / MOB_PAGE);
+                if (selection >= 0 && selection < MOB_PAGE) {
+                    /* 本页第 selection 只：段内真实下标要加上已翻过的页数 */
+                    summonMobTierOne(curMobPage * MOB_PAGE + selection);
+                    mobTierListMenu(curMobTier);   /* 留在原地，可以接着点 */
+                    return;
+                }
+                if (selection == MOB_PAGE) {
+                    if (curMobPage + 1 < totalPage) {
+                        curMobPage++;                /* 下一页 */
+                        mobTierListMenu(curMobTier);
+                    } else {
+                        summonMobTierAll();          /* 末页这一项 = 本段全部召唤 */
+                        mobTierListMenu(curMobTier);
+                    }
+                    return;
+                }
+                if (selection == MOB_PAGE + 1) {
+                    curMobPage = 0;
+                    mobTierMenu();                  /* 换一个等级段 */
+                    return;
+                }
+                if (selection == MOB_PAGE + 2) {
+                    topMenu();                      /* 返回主菜单 */
+                    return;
+                }
+            }
+            topMenu();
             return;
         }
 
