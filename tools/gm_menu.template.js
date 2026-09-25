@@ -334,7 +334,6 @@ function mainMenu() {
     s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
     s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
     s += "#b#L27#背包管理（一键按栏位清理）#k#l\r\n";
-    s += "#b#L28#召唤怪物-点名(101~131)（" + MOB_POINTS_101_131.length + " 只）#k#l\r\n";
     s += "#b#L29#伤害倍率（当前 ×" + cm.getPlayer().getDmgMultiplier() + "）#k#l\r\n";
     s += "#b#L30#攻击速度爆发（速效激发 x-8 最快档，约 9 小时）#k#l\r\n";
     var _totMob = 0;
@@ -1413,75 +1412,8 @@ function summonZakum(pos) {
     cm.dropMessage(5, "[GM] 已召唤扎昆（分段副本）：先清 8 条手臂，再依次击败 3 个形态");
 }
 
-/* ---- 召唤怪物-点名（101~131 普通怪）---- */
-
-function mobPointMenu() {
-    var s = "#e[召唤怪物 - 点名 101~131]#n\r\n";
-    s += "#k点一行 = 召唤该怪到面前（自由行动，不冻结）\r\n";
-    s += "#k可接着点；「全部召唤」一次性把 " + MOB_POINTS_101_131.length + " 只全拉来\r\n\r\n";
-    for (var i = 0; i < MOB_POINTS_101_131.length; i++) {
-        var m = MOB_POINTS_101_131[i];
-        s += "#b#L" + i + "#" + m[1] + "  Lv." + m[2] + "#k#l\r\n";
-    }
-    s += "#b#L" + MOB_POINTS_101_131.length + "##b全部召唤（" + MOB_POINTS_101_131.length + " 只）#k#l\r\n";
-    s += "#b#L" + (MOB_POINTS_101_131.length + 1) + "#b返回主菜单#k#l";
-    status = 47;
-    cm.sendSimple(s);
-}
-
-/* 召唤单只：自动贴地、自由行动（不冻结），失败回退到玩家脚下 */
-function summonMobPoint(idx) {
-    var m = MOB_POINTS_101_131[idx];
-    if (m == null) {
-        return;
-    }
-    var map = cm.getMap();
-    var pos = cm.getPlayer().getPosition();
-    var ok = false;
-    try {
-        map.spawnMonsterOnGroundBelow(m[0], pos.x + 60, pos.y);
-        ok = true;
-    } catch (e1) {
-        try {
-            map.spawnMonsterOnGroundBelow(m[0], pos.x, pos.y);
-            ok = true;
-        } catch (e2) {
-            ok = false;
-        }
-    }
-    if (ok) {
-        cm.dropMessage(5, "[GM] 已召唤 " + m[1] + "（" + m[0] + " Lv." + m[2] + "）");
-    } else {
-        cm.dropMessage(5, "[GM] 召唤失败：这里找不到可落脚的平台，站到平地中间再试");
-    }
-}
-
-/* 全部召唤：一次性把整张清单的怪拉到面前（自由行动）。
- * 循环里逐个 try/catch；横向错开避免叠在同一格；地图有怪物容量上限时超出部分不现身（不报错）。 */
-function summonMobPointsAll() {
-    var map = cm.getMap();
-    var pos = cm.getPlayer().getPosition();
-    var n = MOB_POINTS_101_131.length;
-    var ok = 0;
-    for (var i = 0; i < n; i++) {
-        var m = MOB_POINTS_101_131[i];
-        try {
-            try {
-                map.spawnMonsterOnGroundBelow(m[0], pos.x + 60 + (i % 12) * 24, pos.y);
-            } catch (e1) {
-                map.spawnMonsterOnGroundBelow(m[0], pos.x, pos.y);
-            }
-            ok++;
-        } catch (e2) {
-            /* 单只失败不影响其它 */
-        }
-    }
-    cm.dropMessage(5, "[GM] 已尝试召唤 " + ok + "/" + n + " 只（地图容量满时部分不现身，属正常）");
-}
-
 /* ---- 召唤怪物-全级别段（Lv.1-10 ~ Lv.121 以上，共 13 段）----
- * 和上面的「点名 101~131」是两套：点名是老功能（只有 101 级以上的普通怪），
- * 这里是按等级段整体铺开，每一段都能「点一行召唤一只」，也能「一次性整段拉来」。 */
+ * 按等级段整体铺开，每一段都能「点一行召唤一只」，也能「一次性整段拉来」。 */
 
 /* 选等级段 */
 function mobTierMenu() {
@@ -1530,18 +1462,18 @@ function mobTierListMenu(ti) {
             " 页（第 " + (from + 1) + "~" + to + " 只）]#n\r\n";
     s += "#k点一行 = 召唤 1 只到面前（自由行动，不冻结），可接着点\r\n";
     s += "#k地图容量满了的话超出的不现身（不报错）\r\n\r\n";
+    /* 第一行固定：本段全部召唤（一进来就能点） */
+    s += "#b#L0##b本段全部召唤（" + n + " 只）#k#l\r\n";
     for (i = from; i < to; i++) {
-        s += "#b#L" + (i - from) + "#" + list[i][1] + "  Lv." + list[i][2] + "#k#l\r\n";
+        s += "#b#L" + (i - from + 1) + "#" + list[i][1] + "  Lv." + list[i][2] + "#k#l\r\n";
     }
-    /* 末三行的编号固定：MOB_PAGE = 下一页 或 本段全部召唤，+1 换段，+2 返回。
-     * 怪物行只占 0 ~ MOB_PAGE-1，跟末三行不会撞号。 */
+    /* 末三行编号：MOB_PAGE+1=下一页（如有），MOB_PAGE+2=换段，MOB_PAGE+3=返回。
+     * 怪行占 #L1 ~ #L(MOB_PAGE)，#L0 固定给"全部召唤"，不撞号。 */
     if (hasNext) {
-        s += "#b#L" + MOB_PAGE + "##b下一页（第 " + (curMobPage + 2) + "/" + totalPage + " 页）#k#l\r\n";
-    } else {
-        s += "#b#L" + MOB_PAGE + "##b本段全部召唤（" + n + " 只）#k#l\r\n";
+        s += "#b#L" + (MOB_PAGE + 1) + "##b下一页（第 " + (curMobPage + 2) + "/" + totalPage + " 页）#k#l\r\n";
     }
-    s += "#b#L" + (MOB_PAGE + 1) + "##b换一个等级段#k#l\r\n";
-    s += "#b#L" + (MOB_PAGE + 2) + "#b返回主菜单#k#l";
+    s += "#b#L" + (MOB_PAGE + 2) + "##b换一个等级段#k#l\r\n";
+    s += "#b#L" + (MOB_PAGE + 3) + "#b返回主菜单#k#l";
     status = 50;
     cm.sendSimple(s);
 }
@@ -2056,9 +1988,6 @@ function action(mode, type, selection) {
             } else if (selection == 27) {
                 bagManageMenu();
                 return;
-            } else if (selection == 28) {
-                mobPointMenu();
-                return;
             } else if (selection == 29) {
                 dmgMultMenu();
                 return;
@@ -2425,22 +2354,6 @@ function action(mode, type, selection) {
             return;
         }
 
-        /* ---- 召唤怪物-点名：选某一只 / 全部 ---- */
-        if (status == 47) {
-            if (selection < MOB_POINTS_101_131.length) {
-                summonMobPoint(selection);
-                mobPointMenu();               /* 留在原地，可以接着点 */
-                return;
-            }
-            if (selection == MOB_POINTS_101_131.length) {
-                summonMobPointsAll();
-                mobPointMenu();
-                return;
-            }
-            topMenu();                       /* 返回主菜单 */
-            return;
-        }
-
         /* ---- 召唤怪物-全级别段：选段 / 段内逐只 / 整段召唤 ---- */
         if (status == 49) {
             if (selection >= 0 && selection < MOB_TIERS_ALL.length) {
@@ -2456,29 +2369,32 @@ function action(mode, type, selection) {
             if (mg != null) {
                 var ml = mg[1];
                 var totalPage = Math.ceil(ml.length / MOB_PAGE);
-                if (selection >= 0 && selection < MOB_PAGE) {
-                    /* 本页第 selection 只：段内真实下标要加上已翻过的页数 */
-                    summonMobTierOne(curMobPage * MOB_PAGE + selection);
-                    mobTierListMenu(curMobTier);   /* 留在原地，可以接着点 */
+                if (selection == 0) {
+                    /* 第一行：本段全部召唤 */
+                    summonMobTierAll();
+                    mobTierListMenu(curMobTier);
                     return;
                 }
-                if (selection == MOB_PAGE) {
+                if (selection >= 1 && selection <= MOB_PAGE) {
+                    /* 怪行 #L1~#L(MOB_PAGE)：真实下标 = 已翻页数*MOB_PAGE + (selection-1) */
+                    summonMobTierOne(curMobPage * MOB_PAGE + (selection - 1));
+                    mobTierListMenu(curMobTier);
+                    return;
+                }
+                if (selection == MOB_PAGE + 1) {
                     if (curMobPage + 1 < totalPage) {
-                        curMobPage++;                /* 下一页 */
-                        mobTierListMenu(curMobTier);
-                    } else {
-                        summonMobTierAll();          /* 末页这一项 = 本段全部召唤 */
+                        curMobPage++;
                         mobTierListMenu(curMobTier);
                     }
                     return;
                 }
-                if (selection == MOB_PAGE + 1) {
+                if (selection == MOB_PAGE + 2) {
                     curMobPage = 0;
-                    mobTierMenu();                  /* 换一个等级段 */
+                    mobTierMenu();
                     return;
                 }
-                if (selection == MOB_PAGE + 2) {
-                    topMenu();                      /* 返回主菜单 */
+                if (selection == MOB_PAGE + 3) {
+                    topMenu();
                     return;
                 }
             }

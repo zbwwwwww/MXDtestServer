@@ -2001,9 +2001,11 @@ public class MapleMap {
     private Point vacuumCenter = null;
     private ScheduledFuture<?> vacuumFenceTask = null;
     /** 围栏半径（px）：怪距圈心超过它就被推回圆周，怪也在「±此半径」内自由游走。当前 50 ≈ 圈心左右各 50px。 */
-    private static final int VACUUM_WANDER_RADIUS = 30;
+    private static final int VACUUM_WANDER_RADIUS = 100;
     /** 围栏检查间隔（ms）：只在越界时才推回。250ms 下怪最多探出约 30px（1.5 身位）就被按回圆周。 */
-    private static final int VACUUM_FENCE_INTERVAL = 250;
+    private static final int VACUUM_FENCE_INTERVAL = 50;
+    /** 围栏推回力度：每次 tick 往圆心方向推多少像素。8 = 半人身位。 */
+    private static final int VACUUM_PUSH_STEP = 8;
     /**
      * [地面护栏] 落点地面与「参照高度」允许的最大高低差（px）：超过它说明落点在参照层之外，跳过不动。
      * 60px ≈ 3 身位：能容忍小台阶与斜坡起伏，又能拦住「从平台边缘掉到下一层」这种几百 px 的落差。
