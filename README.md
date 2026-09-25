@@ -210,13 +210,10 @@ DB_PASS: "<你的数据库密码>"
 
 ## 九、推送到 Git 的注意事项
 
-- `.gitignore` 已按本项目实际情况配置：**排除客户端（北冥GMS083/，数 GB 二进制）、编译产物（out/）、存档备份（saves/）、各类 .bak**
-- **客户端分发（本仓库不包含客户端，请单独获取，获取连接如下）**：客户端共 ~6.5 GB，`.wz` 资源占 6.5 GB，有 9 个文件超过 GitHub 单文件 100 MB 硬限（最大 `Character.wz` ≈1.2 GB）——直接 push 会被拒；只提交 EXE 和登录器.bat 也没用，客户端离开 `.wz` 资源无法运行。推荐做法：
-> 📦 **客户端下载**：北冥 GMS083 整合版 —— 百度网盘 `https://pan.baidu.com/s/1BT7UPCUW0g34BTz2ta1qBw` 提取码 `2022`（来源：iopq 藏宝湾「北冥版GMS083一键整合」帖，2022-03）
-> 解压后放到项目根目录，保持目录名 `北冥GMS083\`，与 README 第四节路径一致即可。
-- `cores/` 内是依赖 jar（无 Maven 仓库坐标，属于必需运行库），建议保留入库；若仓库嫌大可改为网盘分发 + README 说明
-- `wz/` 与 `scripts/`、`sql/`、`handbook/`、`src/` 均为文本，正常入库
-- 初次提交建议：`git init && git add . && git commit -m "init: HeavenMS-zhoubw_083 单机服务端"`
+- `.gitignore` 已配置：排除客户端（北冥GMS083/）、编译产物（out/）、存档备份（saves/）、各类 .bak
+- **客户端与 wz 资源需自备**：本仓库仅包含服务端代码，不包含客户端和 `.wz` 资源文件。GMS083 版本的客户端和 wz 数据请自行搜索获取。
+- `cores/` 内是依赖 jar（无 Maven 仓库坐标，属于必需运行库），已入库
+- `scripts/`、`sql/`、`handbook/`、`src/` 均为文本，正常入库
 
 ---
 

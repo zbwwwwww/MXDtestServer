@@ -25,5 +25,8 @@ nohup.out
 Thumbs.db
 Desktop.ini
 
+# ---- wz 资源文件（版权素材，不入库）----
+wz/
+
 # ---- 旧仓库备份（含历史大文件，永不入库）----
 .git.old_with_client/
