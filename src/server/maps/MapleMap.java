@@ -1419,7 +1419,11 @@ public class MapleMap {
         if (chr == null) {
             if (removeKilledMonsterObject(monster)) {
                 monster.dispatchMonsterKilled(false);
-                broadcastMessage(MaplePacketCreator.killMonster(monster.getObjectId(), animation), monster.getPosition());
+                if (suppressDeathPkt.get()) {
+                    pendingDeathPkts.get().add(new Object[]{monster.getObjectId(), animation, monster.getPosition()});
+                } else {
+                    broadcastMessage(MaplePacketCreator.killMonster(monster.getObjectId(), animation), monster.getPosition());
+                }
                 monster.aggroSwitchController(null, false);
             }
         } else {
@@ -1494,7 +1498,11 @@ public class MapleMap {
                     e.printStackTrace();
                 } finally {     // thanks resinate for pointing out a memory leak possibly from an exception thrown
                     monster.dispatchMonsterKilled(true);
-                    broadcastMessage(MaplePacketCreator.killMonster(monster.getObjectId(), animation), monster.getPosition());
+                    if (suppressDeathPkt.get()) {
+                        pendingDeathPkts.get().add(new Object[]{monster.getObjectId(), animation, monster.getPosition()});
+                    } else {
+                        broadcastMessage(MaplePacketCreator.killMonster(monster.getObjectId(), animation), monster.getPosition());
+                    }
                 }
             }
         }
@@ -2154,9 +2162,19 @@ public class MapleMap {
 
     /* ===== 掉落分批器：群攻秒多只怪时避免掉落封包洪泛 ===== */
     private final java.util.Queue<Object[]> dropQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /* 群攻多目标：收集死亡封包，由 AbstractDealDamageHandler 逐只延迟发 */
+    public static final ThreadLocal<Boolean> suppressDeathPkt = new ThreadLocal<Boolean>() {
+        @Override protected Boolean initialValue() { return false; }
+    };
+    public static final ThreadLocal<java.util.List<Object[]>> pendingDeathPkts = new ThreadLocal<java.util.List<Object[]>>() {
+        @Override protected java.util.List<Object[]> initialValue() { return new java.util.ArrayList<>(); }
+    };
+    public static final ThreadLocal<java.util.Map<Integer, Integer>> pendingHpBars = new ThreadLocal<java.util.Map<Integer, Integer>>() {
+        @Override protected java.util.Map<Integer, Integer> initialValue() { return new java.util.HashMap<>(); }
+    };
     private ScheduledFuture<?> dropBatcherTask = null;
-    private static final int DROP_BATCH_SIZE = 5;      /* 每批处理几只怪的掉落 */
-    private static final long DROP_BATCH_INTERVAL = 50; /* 每批间隔 ms */
+    private static final int DROP_BATCH_SIZE = 1;      /* 每批处理几只怪的掉落 */
+    private static final long DROP_BATCH_INTERVAL = 100; /* 每批间隔 ms */
 
     private synchronized void startDropBatcher() {
         if (dropBatcherTask != null) return;

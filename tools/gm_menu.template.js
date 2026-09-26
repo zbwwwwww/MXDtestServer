@@ -293,7 +293,7 @@ var MAX_SEARCH_HITS = 40;
       编号一经发布就不要插队改号 —— 改号会让 dispatch 里的 selection 判断全部错位。 */
 function mainMenu() {
     var map = cm.getMap();
-    var s = "#e[GM 功能菜单]#n  " + map.getMapName() + "（" + map.getId() + "）\r\n";
+    var s = "#e[GM 功能菜单-created by zhoubw]#n  " + map.getMapName() + "（" + map.getId() + "）\r\n";
     s += "#k--- 移动 / 角色 ---\r\n";
     s += "#b#L12#传送地图（猎场 / BOSS / 城镇）#k#l\r\n";
     s += "#b#L13#隐身 / 现身#k#l\r\n";
@@ -1549,8 +1549,11 @@ function summonAllStandardMobs() {
     for (i = 0; i < MOB_TIERS_ALL.length; i++) {
         var list = MOB_TIERS_ALL[i][1];
         var take = Math.min(5, list.length);
+        var pool = [];
+        for (j = 0; j < list.length; j++) pool.push(list[j][0]);
         for (j = 0; j < take; j++) {
-            ids.push(list[j][0]);
+            var idx = Math.floor(Math.random() * pool.length);
+            ids.push(pool.splice(idx, 1)[0]);
         }
     }
     var map = cm.getMap();

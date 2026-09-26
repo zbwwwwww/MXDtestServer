@@ -22,12 +22,7 @@
 package net.server.channel.handlers;
 
 import java.awt.Point;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import config.YamlConfig;
 import net.AbstractMaplePacketHandler;
@@ -188,8 +183,11 @@ public abstract class AbstractDealDamageHandler extends AbstractMaplePacketHandl
                 return;
             }*/
             
-            long totDamage = 0; // 跨怪累加也会溢出 int（全屏多怪×十几亿），改 long
+            long totDamage = 0;
             int caledNum = 0;
+            MapleMap.pendingDeathPkts.get().clear();
+            MapleMap.pendingHpBars.get().clear();
+            MapleMap.suppressDeathPkt.set(true);
             if (attack.skill == ChiefBandit.MESO_EXPLOSION) {
                 int delay = 0;
                 for (Integer oned : attack.allDamage.keySet()) {
@@ -550,7 +548,38 @@ public abstract class AbstractDealDamageHandler extends AbstractMaplePacketHandl
                 }
                 System.out.println("cal end:"+ ++caledNum);
             }
+            MapleMap.suppressDeathPkt.set(false);
+            final java.util.List<Object[]> deaths = new java.util.ArrayList<>(MapleMap.pendingDeathPkts.get());
+            MapleMap.pendingDeathPkts.get().clear();
+            final java.util.Map<Integer, Integer> hpBars = new java.util.HashMap<>(MapleMap.pendingHpBars.get());
+            MapleMap.pendingHpBars.get().clear();
+            int hpIdx = 0;
+            for (java.util.Map.Entry<Integer, Integer> e : hpBars.entrySet()) {
+                final int oid = e.getKey();
+                final int hpPct = e.getValue();
+                TimerManager.getInstance().schedule(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            player.announce(MaplePacketCreator.showMonsterHP(oid, hpPct));
+                        } catch (Exception ex) {}
+                    }
+                }, hpIdx++ * 50);
+            }
+            for (int i = 0; i < deaths.size(); i++) {
+                final int idx = i;
+                TimerManager.getInstance().schedule(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Object[] d = deaths.get(idx);
+                            map.broadcastMessage(MaplePacketCreator.killMonster((Integer)d[0], (Integer)d[1]), (Point)d[2]);
+                        } catch (Exception e) {}
+                    }
+                }, idx * 300);
+            }
         } catch (Exception e) {
+            MapleMap.suppressDeathPkt.set(false);
             e.printStackTrace();
         }
     }

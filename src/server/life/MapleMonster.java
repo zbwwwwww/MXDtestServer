@@ -386,16 +386,20 @@ public class MapleMonster extends AbstractLoadedMapleLife {
             from.getMap().broadcastBossHpMessage(this, this.hashCode(), makeBossHPBarPacket(), getPosition());
         } else if (!isBoss()) {
             int remainingHP = (int) Math.max(1, hp.get() * 100f / getMaxHp());
-            byte[] packet = MaplePacketCreator.showMonsterHP(getObjectId(), remainingHP);
-            if (from.getParty() != null) {
-                for (MaplePartyCharacter mpc : from.getParty().getMembers()) {
-                    MapleCharacter member = from.getMap().getCharacterById(mpc.getId()); // god bless
-                    if (member != null) {
-                        member.announce(packet.clone()); // clone it just in case of crypto
-                    }
-                }
+            if (MapleMap.suppressDeathPkt.get()) {
+                MapleMap.pendingHpBars.get().put(getObjectId(), remainingHP);
             } else {
-                from.announce(packet);
+                byte[] packet = MaplePacketCreator.showMonsterHP(getObjectId(), remainingHP);
+                if (from.getParty() != null) {
+                    for (MaplePartyCharacter mpc : from.getParty().getMembers()) {
+                        MapleCharacter member = from.getMap().getCharacterById(mpc.getId());
+                        if (member != null) {
+                            member.announce(packet.clone());
+                        }
+                    }
+                } else {
+                    from.announce(packet);
+                }
             }
         }
     }
