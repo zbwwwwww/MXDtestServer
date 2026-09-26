@@ -189,7 +189,7 @@ public abstract class AbstractDealDamageHandler extends AbstractMaplePacketHandl
             }*/
             
             long totDamage = 0; // 跨怪累加也会溢出 int（全屏多怪×十几亿），改 long
-
+            int caledNum = 0;
             if (attack.skill == ChiefBandit.MESO_EXPLOSION) {
                 int delay = 0;
                 for (Integer oned : attack.allDamage.keySet()) {
@@ -548,6 +548,7 @@ public abstract class AbstractDealDamageHandler extends AbstractMaplePacketHandl
                         }
                     }
                 }
+                System.out.println("cal end:"+ ++caledNum);
             }
         } catch (Exception e) {
             e.printStackTrace();

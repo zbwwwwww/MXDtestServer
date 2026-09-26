@@ -1869,8 +1869,8 @@ public class MapleMap {
      * 批量异步召唤怪物：每 50ms 召 10 只，避免一次性发太多 spawn 封包导致客户端断线。
      */
     public void spawnMonsterBatch(final List<Integer> mobIds, final Point pos) {
-        final int BATCH = 10;
-        final long DELAY = 50;
+        final int BATCH = 3;
+        final long DELAY = 100;
         final int total = mobIds.size();
         final int[] idx = {0};
         final ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];

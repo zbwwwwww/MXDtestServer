@@ -1441,7 +1441,8 @@ function mobTierMenu() {
     for (j = 0; j < MOB_TIERS_ALL.length; j++) {
         s += "#b#L" + j + "#" + MOB_TIERS_ALL[j][0] + "（" + MOB_TIERS_ALL[j][1].length + " 只）#k#l\r\n";
     }
-    s += "#b#L" + MOB_TIERS_ALL.length + "#b返回主菜单#k#l";
+    s += "#b#L" + MOB_TIERS_ALL.length + "##b召唤所有标准怪物（每段5只）#k#l\r\n";
+    s += "#b#L" + (MOB_TIERS_ALL.length + 1) + "#b返回主菜单#k#l";
     curMobPage = 0;                         /* 换档时页号归零 */
     status = 49;
     cm.sendSimple(s);
@@ -1539,6 +1540,23 @@ function summonMobTierAll() {
     }
     map.spawnMonsterBatch(ids, pos);
     cm.dropMessage(5, "[GM] " + g[0] + "：正在分批召唤 " + n + " 只，请稍候...");
+}
+
+/* 召唤所有标准怪物：每段取前5只，分批召唤 */
+function summonAllStandardMobs() {
+    var ids = [];
+    var i, j;
+    for (i = 0; i < MOB_TIERS_ALL.length; i++) {
+        var list = MOB_TIERS_ALL[i][1];
+        var take = Math.min(5, list.length);
+        for (j = 0; j < take; j++) {
+            ids.push(list[j][0]);
+        }
+    }
+    var map = cm.getMap();
+    var pos = cm.getPlayer().getPosition();
+    map.spawnMonsterBatch(ids, pos);
+    cm.dropMessage(5, "[GM] 正在分批召唤所有标准怪物 " + ids.length + " 只，请稍候...");
 }
 
 /* ================= 伤害倍率（GM） =================
@@ -2369,7 +2387,12 @@ function action(mode, type, selection) {
                 mobTierListMenu(selection);
                 return;
             }
-            topMenu();                       /* 返回主菜单 */
+            if (selection == MOB_TIERS_ALL.length) {
+                summonAllStandardMobs();
+                mobTierMenu();
+                return;
+            }
+            topMenu();
             return;
         }
 

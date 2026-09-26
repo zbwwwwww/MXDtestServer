@@ -330,7 +330,7 @@ public class MobSkill {
                                     spawnIdx[0]++;
                                 }
                             }
-                        }, 200, 200);
+                        }, 400, 400);
                     }
                 }
                 break;
