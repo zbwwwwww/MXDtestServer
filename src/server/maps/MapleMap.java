@@ -1476,7 +1476,9 @@ public class MapleMap {
                         if (dropOwner == null) {
                             dropOwner = chr;
                         }
-                        dropFromMonster(dropOwner, monster, false);
+                        /* 掉落入队，由 dropBatcher 分批发送，避免群攻秒多只怪时封包洪泛 */
+                        startDropBatcher();
+                        dropQueue.add(new Object[]{dropOwner, monster, false});
                     }
 
                     if (monster.hasBossHPBar()) {
@@ -1861,6 +1863,41 @@ public class MapleMap {
         spawnMonster(mob);
     }
 
+    /**
+     * 批量异步召唤怪物：每 50ms 召 10 只，避免一次性发太多 spawn 封包导致客户端断线。
+     */
+    public void spawnMonsterBatch(final List<Integer> mobIds, final Point pos) {
+        final int BATCH = 10;
+        final long DELAY = 50;
+        final int total = mobIds.size();
+        final int[] idx = {0};
+        final ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];
+
+        holder[0] = TimerManager.getInstance().register(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    int end = Math.min(idx[0] + BATCH, total);
+                    for (; idx[0] < end; idx[0]++) {
+                        try {
+                            int x = pos.x + 60 + (idx[0] % 12) * 24;
+                            spawnMonsterOnGroundBelow(mobIds.get(idx[0]), x, pos.y);
+                        } catch (Exception e) {
+                            try {
+                                spawnMonsterOnGroundBelow(mobIds.get(idx[0]), pos.x, pos.y);
+                            } catch (Exception e2) {}
+                        }
+                    }
+                    if (idx[0] >= total) {
+                        holder[0].cancel(false);
+                    }
+                } catch (Exception e) {
+                    holder[0].cancel(false);
+                }
+            }
+        }, DELAY, DELAY);
+    }
+
     public void spawnCPQMonster(MapleMonster mob, Point pos, int team) {
         Point spos = new Point(pos.x, pos.y - 1);
         spos = calcPointBelow(spos);
@@ -2112,6 +2149,28 @@ public class MapleMap {
     }
     /** 吸怪圈心相对「开启时人物站位」的水平右偏移：10 个身位（约 10*20px）；开启那刻钉下后不再变。 */
     private static final int VACUUM_OFFSET_X = 200;
+
+    /* ===== 掉落分批器：群攻秒多只怪时避免掉落封包洪泛 ===== */
+    private final java.util.Queue<Object[]> dropQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private ScheduledFuture<?> dropBatcherTask = null;
+    private static final int DROP_BATCH_SIZE = 5;      /* 每批处理几只怪的掉落 */
+    private static final long DROP_BATCH_INTERVAL = 50; /* 每批间隔 ms */
+
+    private synchronized void startDropBatcher() {
+        if (dropBatcherTask != null) return;
+        dropBatcherTask = TimerManager.getInstance().register(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < DROP_BATCH_SIZE; i++) {
+                    Object[] job = dropQueue.poll();
+                    if (job == null) break;
+                    try {
+                        dropFromMonster((MapleCharacter) job[0], (MapleMonster) job[1], (Boolean) job[2]);
+                    } catch (Exception e) {}
+                }
+            }
+        }, DROP_BATCH_INTERVAL, DROP_BATCH_INTERVAL);
+    }
     /** 把「开启时人物位置」换算成圈心：正右方 VACUUM_OFFSET_X 像素处（y 不变）。 */
     public static Point vacuumTargetPoint(Point origin) {
         return new Point(origin.x + VACUUM_OFFSET_X, origin.y);

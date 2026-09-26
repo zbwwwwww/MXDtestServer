@@ -1494,46 +1494,6 @@ var BOSS_TIERS = [
  *           本版本 101~131 共 80 只，其中 42 只 BOSS 已有独立「召唤 BOSS」功能，
  *           默认只放普通怪（38 只）；要连 BOSS 一起点名，改 gen 脚本 INCLUDE_BOSS 重生成。
  * 召唤用 map.spawnMonsterOnGroundBelow：自动贴地、自由行动（不冻结）。 */
-var MOB_POINTS_101_131 = [
-    [8150301, "蓝飞龙", 101],
-    [8200004, "追忆的守护队长", 101],
-    [9300071, "洞穴蓝飞龙1", 101],
-    [9300072, "洞穴蓝飞龙2", 101],
-    [9300265, "蓝飞龙", 101],
-    [8150101, "尖鼻鲨鱼", 102],
-    [8150302, "黑飞龙", 103],
-    [9300073, "洞穴黑飞龙1", 103],
-    [9300074, "洞穴黑飞龙2", 103],
-    [9300264, "黑飞龙", 103],
-    [8150201, "邪恶双刀蜥蜴", 105],
-    [8190000, "小蜥蜴", 105],
-    [8190001, "变种小蜥蜴", 105],
-    [9300067, "洞穴邪恶双刀蜥蜴1", 105],
-    [9300068, "洞穴邪恶双刀蜥蜴2", 105],
-    [9300078, "洞穴小蜥蜴", 105],
-    [8200005, "后悔的祭司", 106],
-    [8160000, "时间门神", 108],
-    [8170000, "黑甲凶灵", 108],
-    [8200006, "后悔的神官", 109],
-    [8190002, "泥人妖", 110],
-    [8190003, "骷髅龙", 110],
-    [8190005, "泥人妖", 110],
-    [9300075, "洞穴骷髅龙1", 110],
-    [9300076, "洞穴骷髅龙2", 110],
-    [9300079, "洞穴泥人妖", 110],
-    [8190004, "老骷髅龙", 113],
-    [8200007, "后悔的守护兵", 113],
-    [9300077, "洞穴T骷髅龙", 113],
-    [8200008, "后悔的守护队长", 116],
-    [9300163, "妙仙", 120],
-    [9300164, "秘籍", 120],
-    [9300165, "猿公", 120],
-    [9400582, "绯红卫士", 120],
-    [8200009, "忘却的祭司", 121],
-    [8200010, "忘却的神官", 124],
-    [8200011, "忘却的守护兵", 128],
-    [8200012, "忘却的守护队长", 131]
-];
 
 /* ================= 第 9 轮新增数据（全级别段召唤 / 传送地图扩充） =================
  * 注意：下面三个占位符本身就是完整的数组字面量（含最外层 []），别再套一层。
@@ -2592,7 +2552,11 @@ function mainMenu() {
     s += "#k--- 数值 ---\r\n";
     s += "#b#L0#加经验 100 万#k#l\r\n";
     s += "#b#L1#加经验 1 亿（直接升级）#k#l\r\n";
+    s += "#b#L23#加经验（自定义数值）#k#l\r\n";
     s += "#b#L2#加金币 1 亿#k#l\r\n";
+    s += "#b#L24#加金币（自定义数值）#k#l\r\n";
+    s += "#b#L29#伤害倍率（当前 ×" + cm.getPlayer().getDmgMultiplier() + "）#k#l\r\n";
+    s += "#b#L30#攻击速度爆发（速效激发 x-8 最快档，约 9 小时）#k#l\r\n";
     s += "#b#L3#洗属性点（重置为初始属性）#k#l\r\n";
     s += "#b#L4##b修改属性点（自定 STR/DEX/INT/LUK）#k#l\r\n";
     s += "#b#L5#满技能（本职业全部技能练满）#k#l\r\n";
@@ -2605,6 +2569,7 @@ function mainMenu() {
     s += "#k--- 物品 / 背包 ---\r\n";
     s += "#b#L9##b获取物品（点选 / 输入ID）#k#l\r\n";
     s += "#b#L10#扩充背包（选栏位类型）#k#l\r\n";
+    s += "#b#L27#背包管理（一键按栏位清理）#k#l\r\n";
     s += "#b#L11#上 BUFF（输入道具ID，不消耗）#k#l\r\n";
     s += "\r\n";
     s += "#k--- 移动 / 角色 ---\r\n";
@@ -2613,28 +2578,21 @@ function mainMenu() {
     s += "#b#L14#去自由市场#k#l\r\n";
     s += "#b#L15#回满 HP / MP#k#l\r\n";
     s += "#b#L16#当前地图信息#k#l\r\n";
+    s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
     s += "\r\n";
     s += "#k--- 怪物 / 地面 ---\r\n";
     s += "#b#L17#捡取全图物品（全屏捡物）#k#l\r\n";
     s += "#b#L18#吸取全图怪物（全拉到脚下）#k#l\r\n";
     s += "#b#L19#生成怪物（输入 ID + 数量）#k#l\r\n";
-    s += "#b#L20#清空本图怪物（无掉落）#k#l\r\n";
-    s += "#b#L21#清空本图怪物（有掉落）#k#l\r\n";
-    s += "#b#L22#清理地上掉落物#k#l\r\n";
-    s += "\r\n";
-    s += "#k--- 新增 ---\r\n";
-    s += "#b#L23#加经验（自定义数值）#k#l\r\n";
-    s += "#b#L24#加金币（自定义数值）#k#l\r\n";
-    s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
-    s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
-    s += "#b#L27#背包管理（一键按栏位清理）#k#l\r\n";
-    s += "#b#L29#伤害倍率（当前 ×" + cm.getPlayer().getDmgMultiplier() + "）#k#l\r\n";
-    s += "#b#L30#攻击速度爆发（速效激发 x-8 最快档，约 9 小时）#k#l\r\n";
     var _totMob = 0;
     for (var _mi = 0; _mi < MOB_TIERS_ALL.length; _mi++) {
         _totMob += MOB_TIERS_ALL[_mi][1].length;
     }
     s += "#b#L31#召唤怪物-全级别段（" + MOB_TIERS_ALL.length + " 段 / " + _totMob + " 只）#k#l\r\n";
+    s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
+    s += "#b#L20#清空本图怪物（无掉落）#k#l\r\n";
+    s += "#b#L21#清空本图怪物（有掉落）#k#l\r\n";
+    s += "#b#L22#清理地上掉落物#k#l\r\n";
     s += "#b#L32#关闭菜单#k#l";
     return s;
 }
@@ -2715,11 +2673,14 @@ function spotMenu(title) {
         }
         s += "#b#L" + (i - start) + "#" + txt + "#k#l\r\n";
     }
-    if (end < n) {
-        var pages = Math.ceil(n / MAP_PAGE);
-        s += "#b#L" + MAP_PAGE + "#下一页（第 " + (MAP_PAGE_NO + 1) + " / " + pages + " 页）#k#l\r\n";
+    var pages = Math.ceil(n / MAP_PAGE);
+    if (MAP_PAGE_NO > 0) {
+        s += "#b#L" + MAP_PAGE + "#上一页（第 " + MAP_PAGE_NO + " / " + pages + " 页）#k#l\r\n";
     }
-    s += "#b#L" + (MAP_PAGE + 1) + "##b返回传送菜单#k#l";
+    if (end < n) {
+        s += "#b#L" + (MAP_PAGE + 1) + "#下一页（第 " + (MAP_PAGE_NO + 2) + " / " + pages + " 页）#k#l\r\n";
+    }
+    s += "#b#L" + (MAP_PAGE + 2) + "##b返回传送菜单#k#l";
     return s;
 }
 
@@ -3421,15 +3382,12 @@ function spawnMobs(text) {
     var px = Math.floor(pos.getX());
     var py = Math.floor(pos.getY());
 
-    var ok = 0;
+    var ids = [];
     for (var i = 0; i < count; i++) {
-        try {
-            cm.spawnMonster(mobId, px, py);
-            ok++;
-        } catch (e) {
-        }
+        ids.push(mobId);
     }
-    cm.dropMessage(5, "[GM] 已生成 " + ok + "/" + count + " 只「" + name + "」（ID " + mobId + "）");
+    cm.getMap().spawnMonsterBatch(ids, new Packages.java.awt.Point(px, py));
+    cm.dropMessage(5, "[GM] 正在分批召唤 " + count + " 只「" + name + "」，请稍候...");
 }
 
 /* 清理地上掉落物 */
@@ -3648,16 +3606,28 @@ function summonZakum(pos) {
     var map = cm.getMap();
     var chr = cm.getPlayer();
 
-    /* 1) 刷 8 条手臂：先清手臂，主体 8800000 才能打（Java 端 MapleMap.damageMonster 自动锁定） */
-    for (var i = 8800003; i <= 8800010; i++) {
-        try {
-            map.spawnMonsterOnGroundBelow(i, pos.x + 60, pos.y);
-        } catch (e1) {
+    /* 1) 刷 8 条手臂：分批 spawn（每批2只，同位置），避免封包洪泛 */
+    var armIds = [];
+    for (var i = 8800003; i <= 8800010; i++) armIds.push(i);
+    var armIdx = 0;
+    var armHolder = [null];
+    armHolder[0] = Packages.server.TimerManager.getInstance().register(new Packages.java.lang.Runnable() {
+        run: function() {
             try {
-                map.spawnMonsterOnGroundBelow(i, pos.x, pos.y);
-            } catch (e2) {}
+                for (var b = 0; b < 2 && armIdx < armIds.length; b++) {
+                    try {
+                        map.spawnMonsterOnGroundBelow(armIds[armIdx], pos.x + 60, pos.y);
+                    } catch (e1) {
+                        try {
+                            map.spawnMonsterOnGroundBelow(armIds[armIdx], pos.x, pos.y);
+                        } catch (e2) {}
+                    }
+                    armIdx++;
+                }
+                if (armIdx >= armIds.length) armHolder[0].cancel(false);
+            } catch (e) { armHolder[0].cancel(false); }
         }
-    }
+    }, 50, 50);
 
     /* 预先创建二、三形态对象（闭包捕获，在监听回调里 spawn，避免依赖 NPC 会话存活） */
     var m1 = cm.getMonsterLifeFactory(8800001);
@@ -3803,7 +3773,7 @@ function summonMobTierOne(idx) {
     }
 }
 
-/* 整段召唤：横向错开避免叠在同一格；单只失败不影响其它 */
+/* 整段召唤：Java层异步分批，每50ms召10只，避免封包洪泛断线 */
 function summonMobTierAll() {
     var g = MOB_TIERS_ALL[curMobTier];
     if (g == null) {
@@ -3813,23 +3783,13 @@ function summonMobTierAll() {
     var n = list.length;
     var map = cm.getMap();
     var pos = cm.getPlayer().getPosition();
-    var ok = 0;
+    var ids = [];
     var i;
     for (i = 0; i < n; i++) {
-        var m = list[i];
-        try {
-            try {
-                map.spawnMonsterOnGroundBelow(m[0], pos.x + 60 + (i % 12) * 24, pos.y);
-            } catch (e1) {
-                map.spawnMonsterOnGroundBelow(m[0], pos.x, pos.y);
-            }
-            ok++;
-        } catch (e2) {
-            /* 单只失败不影响其它 */
-        }
+        ids.push(list[i][0]);
     }
-    cm.dropMessage(5, "[GM] " + g[0] + "：已尝试召唤 " + ok + "/" + n +
-                      " 只（地图容量满时部分不现身，属正常）");
+    map.spawnMonsterBatch(ids, pos);
+    cm.dropMessage(5, "[GM] " + g[0] + "：正在分批召唤 " + n + " 只，请稍候...");
 }
 
 /* ================= 伤害倍率（GM） =================
@@ -4397,7 +4357,7 @@ function action(mode, type, selection) {
         /* ---- 传送地图：从列表里选一个（分页） ---- */
         if (status == 16) {
             var rng = spotRange();
-            if (selection == MAP_PAGE + 1) {
+            if (selection == MAP_PAGE + 2) {
                 /* 返回传送菜单 */
                 MAP_PAGE_NO = 0;
                 curList = null;
@@ -4405,8 +4365,14 @@ function action(mode, type, selection) {
                 cm.sendSimple(warpMenu());
                 return;
             }
-            if (selection == MAP_PAGE && rng[1] < curList.length) {
-                /* 下一页（最后一页没有这个按钮，这里必定还有） */
+            if (selection == MAP_PAGE && MAP_PAGE_NO > 0) {
+                /* 上一页 */
+                MAP_PAGE_NO--;
+                cm.sendSimple(spotMenu(curTitle));
+                return;
+            }
+            if (selection == MAP_PAGE + 1 && rng[1] < curList.length) {
+                /* 下一页 */
                 MAP_PAGE_NO++;
                 status = 16;
                 cm.sendSimple(spotMenu(curTitle));
@@ -4675,19 +4641,22 @@ function action(mode, type, selection) {
                     mobTierListMenu(curMobTier);
                     return;
                 }
-                if (selection == MOB_PAGE + 1) {
-                    if (curMobPage + 1 < totalPage) {
-                        curMobPage++;
-                        mobTierListMenu(curMobTier);
-                    }
+                if (selection == MOB_PAGE + 1 && curMobPage > 0) {
+                    curMobPage--;
+                    mobTierListMenu(curMobTier);
                     return;
                 }
-                if (selection == MOB_PAGE + 2) {
+                if (selection == MOB_PAGE + 2 && curMobPage + 1 < totalPage) {
+                    curMobPage++;
+                    mobTierListMenu(curMobTier);
+                    return;
+                }
+                if (selection == MOB_PAGE + 3) {
                     curMobPage = 0;
                     mobTierMenu();
                     return;
                 }
-                if (selection == MOB_PAGE + 3) {
+                if (selection == MOB_PAGE + 4) {
                     topMenu();
                     return;
                 }

@@ -26,7 +26,6 @@ HINT_TXT = r"D:\MXDtestServer\handbook\GM提示文本-待粘贴.txt"
 SKILL_TSV = os.path.join(_HERE, "fixE-bench", "skill_names_all.tsv")
 HUNT_TXT = r"D:\MXDtestServer\handbook\猎场清单-补充-待粘贴.txt"
 BOSS_TIERS_JS = os.path.join(_HERE, "gm_extra_boss.js")      # 第 8 轮：可召唤 BOSS（gen_extra_data.py 产出）
-MOB_POINTS_JS = os.path.join(_HERE, "gm_extra_mobs_101_131.js")  # 召唤怪物-点名 101~131（gen_mob_points_101_131.py 产出）
 TOWNS_JS = os.path.join(_HERE, "gm_extra_towns.js")              # 城镇全表（gen_maps_extra.py 产出）
 HUNT_HIGH_JS = os.path.join(_HERE, "gm_extra_hunts_high.js")     # Lv.100+ 练级场（gen_maps_extra.py 产出）
 MOB_ALL_JS = os.path.join(_HERE, "gm_extra_mobs_all.js")         # 召唤怪物-全级别段（gen_mob_all.py 产出）
@@ -293,42 +292,6 @@ if not gb_ok(BOSS_TIERS_TXT):
 notes.append('可召唤 BOSS：%d 只 / %d 档（%s）' % (
     len(boss_rows), len(boss_tier_names), '、'.join(boss_tier_names)))
 
-
-# ==================================================== 3.6 召唤怪物-点名（101~131）
-# 数据由 gen_mob_points_101_131.py 从服务端 Mob.wz + String.wz/Mob.img 全量导出，
-# 这里只做装配 + 校验。结构和 BOSS_TIERS 同款防御：占位符本身带最外层 []，不能多套一层。
-mob_raw = io.open(MOB_POINTS_JS, encoding='utf-8').read()
-mm = re.search(r'var MOB_POINTS_101_131 = (\[[\s\S]*\]);', mob_raw)
-if not mm:
-    sys.exit('gm_extra_mobs_101_131.js 里找不到 MOB_POINTS_101_131 数组')
-MOB_POINTS_TXT = mm.group(1)
-
-try:
-    _mob_parsed = ast.literal_eval(MOB_POINTS_TXT)
-except Exception as e:
-    problems.append('MOB_POINTS_101_131 不是合法数组字面量：%s' % e)
-    _mob_parsed = None
-if _mob_parsed is not None:
-    if not isinstance(_mob_parsed, list) or len(_mob_parsed) == 0:
-        problems.append('MOB_POINTS_101_131 顶层元素数 = %s（期望 >0）'
-                        % (len(_mob_parsed) if isinstance(_mob_parsed, list) else type(_mob_parsed).__name__))
-    else:
-        for _r in _mob_parsed:
-            if not (isinstance(_r, list) and len(_r) == 3 and
-                    isinstance(_r[0], int) and isinstance(_r[2], int)):
-                problems.append('MOB_POINTS 行结构不对（应为 [id, 名, level]）：%r' % (_r,))
-                break
-
-mob_rows = re.findall(r'\[(\d+), "([^"]+)", (\d+)\]', MOB_POINTS_TXT)
-if len(mob_rows) == 0:
-    problems.append('MOB_POINTS 一条都没解析出来')
-for mid, mnm, mlv in mob_rows:
-    if not gb_ok(mnm):
-        problems.append('MOB_POINTS 怪物名 GB2312 编不了：%s %s' % (mid, mnm))
-if not gb_ok(MOB_POINTS_TXT):
-    problems.append('MOB_POINTS 数据块含 GB2312 编不了的字符')
-
-notes.append('召唤怪物-点名 101~131：%d 只（普通怪，BOSS 已剔除）' % len(mob_rows))
 
 
 # ==================================================== 3.7 通用数组守卫
@@ -604,7 +567,6 @@ REPL = [
     ('/*@SKILL_NAME_TXT@*/', skill_name_txt_js()),
     ('/*@ITEM_GROUPS@*/', item_groups_js()),
     ('/*@BOSS_TIERS@*/', BOSS_TIERS_TXT),
-    ('/*@MOB_POINTS@*/', MOB_POINTS_TXT),
     # 注意：rows_js() 只产出行内容，不含最外层 [] —— 模板这边是 `= /*@X@*/;`
     # （占位符自带 []），所以必须自己把方括号包上，否则生成出来是 `var X =` 接一串行。
     ('/*@TOWN_MAPS_ALL@*/', '[\n' + rows_js(town_all_rows) + '\n]'),
