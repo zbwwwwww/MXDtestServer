@@ -2549,6 +2549,28 @@ var MAX_SEARCH_HITS = 40;
 function mainMenu() {
     var map = cm.getMap();
     var s = "#e[GM 功能菜单]#n  " + map.getMapName() + "（" + map.getId() + "）\r\n";
+    s += "#k--- 移动 / 角色 ---\r\n";
+    s += "#b#L12#传送地图（猎场 / BOSS / 城镇）#k#l\r\n";
+    s += "#b#L13#隐身 / 现身#k#l\r\n";
+    s += "#b#L14#去自由市场#k#l\r\n";
+    s += "#b#L15#回满 HP / MP#k#l\r\n";
+    s += "#b#L16#当前地图信息#k#l\r\n";
+    s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
+    s += "\r\n";
+    s += "#k--- 怪物 / 地面 ---\r\n";
+    s += "#b#L17#捡取全图物品（全屏捡物）#k#l\r\n";
+    s += "#b#L18#吸取全图怪物（全拉到脚下）#k#l\r\n";
+    s += "#b#L19#生成怪物（输入 ID + 数量）#k#l\r\n";
+    var _totMob = 0;
+    for (var _mi = 0; _mi < MOB_TIERS_ALL.length; _mi++) {
+        _totMob += MOB_TIERS_ALL[_mi][1].length;
+    }
+    s += "#b#L31#召唤怪物-全级别段（" + MOB_TIERS_ALL.length + " 段 / " + _totMob + " 只）#k#l\r\n";
+    s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
+    s += "#b#L20#清空本图怪物（无掉落）#k#l\r\n";
+    s += "#b#L21#清空本图怪物（有掉落）#k#l\r\n";
+    s += "#b#L22#清理地上掉落物#k#l\r\n";
+    s += "\r\n";
     s += "#k--- 数值 ---\r\n";
     s += "#b#L0#加经验 100 万#k#l\r\n";
     s += "#b#L1#加经验 1 亿（直接升级）#k#l\r\n";
@@ -2571,28 +2593,6 @@ function mainMenu() {
     s += "#b#L10#扩充背包（选栏位类型）#k#l\r\n";
     s += "#b#L27#背包管理（一键按栏位清理）#k#l\r\n";
     s += "#b#L11#上 BUFF（输入道具ID，不消耗）#k#l\r\n";
-    s += "\r\n";
-    s += "#k--- 移动 / 角色 ---\r\n";
-    s += "#b#L12#传送地图（猎场 / BOSS / 城镇）#k#l\r\n";
-    s += "#b#L13#隐身 / 现身#k#l\r\n";
-    s += "#b#L14#去自由市场#k#l\r\n";
-    s += "#b#L15#回满 HP / MP#k#l\r\n";
-    s += "#b#L16#当前地图信息#k#l\r\n";
-    s += "#b#L26#特效 / 播报（公告 / 特效 / 倒计时 / 称号）#k#l\r\n";
-    s += "\r\n";
-    s += "#k--- 怪物 / 地面 ---\r\n";
-    s += "#b#L17#捡取全图物品（全屏捡物）#k#l\r\n";
-    s += "#b#L18#吸取全图怪物（全拉到脚下）#k#l\r\n";
-    s += "#b#L19#生成怪物（输入 ID + 数量）#k#l\r\n";
-    var _totMob = 0;
-    for (var _mi = 0; _mi < MOB_TIERS_ALL.length; _mi++) {
-        _totMob += MOB_TIERS_ALL[_mi][1].length;
-    }
-    s += "#b#L31#召唤怪物-全级别段（" + MOB_TIERS_ALL.length + " 段 / " + _totMob + " 只）#k#l\r\n";
-    s += "#b#L25#召唤 BOSS（点选，" + countBoss() + " 只）#k#l\r\n";
-    s += "#b#L20#清空本图怪物（无掉落）#k#l\r\n";
-    s += "#b#L21#清空本图怪物（有掉落）#k#l\r\n";
-    s += "#b#L22#清理地上掉落物#k#l\r\n";
     s += "#b#L32#关闭菜单#k#l";
     return s;
 }
@@ -3614,7 +3614,7 @@ function summonZakum(pos) {
     armHolder[0] = Packages.server.TimerManager.getInstance().register(new Packages.java.lang.Runnable() {
         run: function() {
             try {
-                for (var b = 0; b < 2 && armIdx < armIds.length; b++) {
+                for (var b = 0; b < 1 && armIdx < armIds.length; b++) {
                     try {
                         map.spawnMonsterOnGroundBelow(armIds[armIdx], pos.x + 60, pos.y);
                     } catch (e1) {
@@ -3627,7 +3627,7 @@ function summonZakum(pos) {
                 if (armIdx >= armIds.length) armHolder[0].cancel(false);
             } catch (e) { armHolder[0].cancel(false); }
         }
-    }, 50, 50);
+    }, 200, 200);
 
     /* 预先创建二、三形态对象（闭包捕获，在监听回调里 spawn，避免依赖 NPC 会话存活） */
     var m1 = cm.getMonsterLifeFactory(8800001);
@@ -3651,15 +3651,19 @@ function summonZakum(pos) {
     /* 3) 阶段监听：8800000 死 -> 8800001；8800001 死 -> 8800002；8800002 死 -> 通关广播 */
     m0.addListener(new Packages.server.life.MonsterListener() {
         monsterKilled: function(aniTime) {
-            chr.getMap().spawnMonsterOnGroundBelow(m1, new Packages.java.awt.Point(pos.x, pos.y));
-            try { chr.dropMessage(5, "[GM] 扎昆第二形态出现！"); } catch (e) {}
+            try {
+                chr.getMap().spawnMonsterOnGroundBelow(m1, new Packages.java.awt.Point(pos.x, pos.y));
+                chr.dropMessage(5, "[GM] 扎昆第二形态出现！");
+            } catch (e) {}
             m1.addListener(new Packages.server.life.MonsterListener() {
                 monsterKilled: function(aniTime) {
-                    chr.getMap().spawnMonsterOnGroundBelow(m2, new Packages.java.awt.Point(pos.x, pos.y));
-                    try { chr.dropMessage(5, "[GM] 扎昆最终形态出现！"); } catch (e) {}
+                    try {
+                        chr.getMap().spawnMonsterOnGroundBelow(m2, new Packages.java.awt.Point(pos.x, pos.y));
+                        chr.dropMessage(5, "[GM] 扎昆最终形态出现！");
+                    } catch (e) {}
                     m2.addListener(new Packages.server.life.MonsterListener() {
                         monsterKilled: function(aniTime) {
-                            chr.getMap().broadcastZakumVictory();
+                            try { chr.getMap().broadcastZakumVictory(); } catch (e) {}
                         },
                         monsterDamaged: function(from, trueDmg) {},
                         monsterHealed: function(trueHeal) {}

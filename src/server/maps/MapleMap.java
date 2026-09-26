@@ -1457,17 +1457,19 @@ public class MapleMap {
                             }
                         }
                         if (makeZakReal) {
-                            MapleMap map = chr.getMap();
-
-                            for (MapleMapObject object : objects) {
-                                MapleMonster mons = map.getMonsterByOid(object.getObjectId());
-                                if (mons != null) {
-                                    if (mons.getId() == 8800000) {
-                                        makeMonsterReal(mons);
-                                        break;
+                            final MapleMap zakMap = chr.getMap();
+                            TimerManager.getInstance().schedule(new Runnable() {
+                                @Override
+                                public void run() {
+                                    for (MapleMapObject object : zakMap.getMapObjects()) {
+                                        MapleMonster mons = zakMap.getMonsterByOid(object.getObjectId());
+                                        if (mons != null && mons.getId() == 8800000) {
+                                            zakMap.makeMonsterReal(mons);
+                                            break;
+                                        }
                                     }
                                 }
-                            }
+                            }, 500);
                         }
                     }
                     

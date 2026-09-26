@@ -7,7 +7,7 @@ worlds:
     server_message: 欢迎来到，周哥冒险岛beta4.0！
     event_message: Scania!
     why_am_i_recommended: Welcome to Scania!
-    channels: 1
+    channels: 3
     exp_rate: 5000                 # 经验倍率
     meso_rate: 10000000               # 金币倍率
     drop_rate: 1               # 普通怪掉落倍率  ← 现在是 1（原版）

@@ -40,6 +40,7 @@ import server.maps.MapleMapObject;
 import server.maps.MapleMapObjectType;
 import server.maps.MapleMist;
 import tools.ArrayMap;
+import server.TimerManager;
 
 /**
  *
@@ -252,35 +253,39 @@ public class MobSkill {
                     skillLimit = Integer.MAX_VALUE;
                 }
 
-                if (map.getSpawnedMonstersOnMap() < 80) {
+                if (map.getSpawnedMonstersOnMap() < 30) {
                     List<Integer> summons = getSummons();
                     int summonLimit = monster.countAvailableMobSummons(summons.size(), skillLimit);
                     if (summonLimit >= 1) {
                         boolean bossRushMap = GameConstants.isBossRush(map.getId());
                         
                         Collections.shuffle(summons);
+                        final List<MapleMonster> toSpawnList = new ArrayList<>();
+                        final boolean bossRushMapFinal = bossRushMap;
+                        final MapleMap mapFinal = map;
+                        final MapleMonster monsterFinal = monster;
                         for (Integer mobId : summons.subList(0, summonLimit)) {
                             MapleMonster toSpawn = MapleLifeFactory.getMonster(mobId);
                             if (toSpawn != null) {
                                 if (bossRushMap) {
-                                    toSpawn.disableDrops();  // no littering on BRPQ pls
+                                    toSpawn.disableDrops();
                                 }
                                 toSpawn.setPosition(monster.getPosition());
                                 int ypos, xpos;
                                 xpos = (int) monster.getPosition().getX();
                                 ypos = (int) monster.getPosition().getY();
                                 switch (mobId) {
-                                    case 8500003: // Pap bomb high
+                                    case 8500003:
                                         toSpawn.setFh((int) Math.ceil(Math.random() * 19.0));
                                         ypos = -590;
                                         break;
-                                    case 8500004: // Pap bomb
+                                    case 8500004:
                                         xpos = (int) (monster.getPosition().getX() + Randomizer.nextInt(1000) - 500);
                                         if (ypos != -590) {
                                             ypos = (int) monster.getPosition().getY();
                                         }
                                         break;
-                                    case 8510100: //Pianus bomb
+                                    case 8510100:
                                         if (Math.ceil(Math.random() * 5) == 1) {
                                             ypos = 78;
                                             xpos = (int) Randomizer.nextInt(5) + (Randomizer.nextInt(2) == 1 ? 180 : 0);
@@ -290,14 +295,14 @@ public class MobSkill {
                                         break;
                                 }
                                 switch (map.getId()) {
-                                    case 220080001: //Pap map
+                                    case 220080001:
                                         if (xpos < -890) {
                                             xpos = (int) (Math.ceil(Math.random() * 150) - 890);
                                         } else if (xpos > 230) {
                                             xpos = (int) (230 - Math.ceil(Math.random() * 150));
                                         }
                                         break;
-                                    case 230040420: // Pianus map
+                                    case 230040420:
                                         if (xpos < -239) {
                                             xpos = (int) (Math.ceil(Math.random() * 150) - 239);
                                         } else if (xpos > 371) {
@@ -306,14 +311,26 @@ public class MobSkill {
                                         break;
                                 }
                                 toSpawn.setPosition(new Point(xpos, ypos));
-                                if (toSpawn.getId() == 8500004) {
-                                    map.spawnFakeMonster(toSpawn);
-                                } else {
-                                    map.spawnMonsterWithEffect(toSpawn, getSpawnEffect(), toSpawn.getPosition());
-                                }
-                                monster.addSummonedMob(toSpawn);
+                                toSpawnList.add(toSpawn);
                             }
                         }
+                        /* 分批召唤：每200ms召1只，避免瞬间发太多spawn封包 */
+                        final int[] spawnIdx = {0};
+                        TimerManager.getInstance().register(new Runnable() {
+                            @Override
+                            public void run() {
+                                for (int b = 0; b < 1 && spawnIdx[0] < toSpawnList.size(); b++) {
+                                    MapleMonster ms = toSpawnList.get(spawnIdx[0]);
+                                    if (ms.getId() == 8500004) {
+                                        mapFinal.spawnFakeMonster(ms);
+                                    } else {
+                                        mapFinal.spawnMonsterWithEffect(ms, getSpawnEffect(), ms.getPosition());
+                                    }
+                                    monsterFinal.addSummonedMob(ms);
+                                    spawnIdx[0]++;
+                                }
+                            }
+                        }, 200, 200);
                     }
                 }
                 break;
